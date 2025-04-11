@@ -122,7 +122,6 @@ def load_data(folder_path, rois, valid_subjects=None):
     
     return df, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
 
-
 def load_data_2(folder_path, rois, valid_subjects=None):
     
     # Load Excel files
@@ -167,6 +166,60 @@ def load_data_2(folder_path, rois, valid_subjects=None):
                 "subject_id": sub,
                 "T1_matrix": t1_matrix,
                 "T3_matrix": t3_matrix
+            })
+
+    # Create dataframe
+    df = pd.DataFrame(data_rows)
+
+    # Merge metadata
+    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
+
+    return df, rsfMRI_full_info, rsfMRI_info, df["subject_id"].tolist()
+
+def load_data_3(folder_path, rois, valid_subjects=None):
+    
+    # Load Excel files
+    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")
+    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
+    rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
+    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
+
+    # Extract valid subjects from last 4 characters
+    valid_subjects = rsfMRI_full_info["subject_id"].astype(str).str[-4:].tolist()
+
+    # Match folders with valid subject_id
+    subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
+
+    data_rows = []
+
+    for sub in subjects:
+        sub_folder = os.path.join(folder_path, sub)
+        files = [f for f in os.listdir(sub_folder) if f.endswith('.mat')]
+
+        t1_matrix = None
+        t4_matrix = None
+
+        for mat_file in files:
+            mat_file_path = os.path.join(sub_folder, mat_file)
+
+            # Load the matrix
+            mat_data = scipy.io.loadmat(mat_file_path)
+            if 'CM' not in mat_data:
+                continue
+
+            matrix = pd.DataFrame(mat_data['CM']).iloc[rois, rois]
+
+            if 'T1' in mat_file:
+                t1_matrix = matrix
+            elif 'T4' in mat_file:
+                t4_matrix = matrix
+
+        # Only keep subjects with both T1 and T4
+        if t1_matrix is not None and t4_matrix is not None:
+            data_rows.append({
+                "subject_id": sub,
+                "T1_matrix": t1_matrix,
+                "T4_matrix": t4_matrix
             })
 
     # Create dataframe
