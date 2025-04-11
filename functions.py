@@ -50,16 +50,16 @@ def load_data(folder_path, rois):
     regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
-    # Keep only the first appearance of each StudyID
-    #regression_info = regression_info.drop_duplicates(subset=["StudyID"], keep="first")
+    # Keep only the first appearance of each subject_id
+    #regression_info = regression_info.drop_duplicates(subset=["subject_id"], keep="first")
 
-    # Merge on StudyID
-    #rsfMRI_info = rsfMRI_info.merge(regression_info, on="StudyID", how="left")
+    # Merge on subject_id
+    #rsfMRI_info = rsfMRI_info.merge(regression_info, on="subject_id", how="left")
     
-    # Extract last 4 characters of StudyID
+    # Extract last 4 characters of subject_id
     valid_subjects = rsfMRI_info["subject_id"].astype(str).str[-4:].tolist()
 
-    # Match folders with valid StudyIDs
+    # Match folders with valid subject_id
     subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
 
     # Define session order
@@ -109,7 +109,7 @@ def load_data(folder_path, rois):
         if col not in df.columns:
             df[col] = None
     
-    # Merge the DataFrame with rsfMRI_info on StudyID
+    # Merge the DataFrame with rsfMRI_info on subject_id
     df = df.merge(rsfMRI_info, on="subject_id", how="left")
     
     return df, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
