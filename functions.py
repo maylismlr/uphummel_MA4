@@ -46,7 +46,7 @@ def load_data_T1_only(folder_path, rois):
 
 def load_data(folder_path, rois):
     # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")  
+    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")['subject_id', 'Lesioned hemisphere', 'Lesion location']  
     regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
