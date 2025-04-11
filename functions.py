@@ -109,7 +109,7 @@ def load_data(folder_path, rois):
         if col not in df.columns:
             df[col] = None
     
-    return subject_matrices, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
+    return df, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
 
 def matrices_to_wide_df(subject_matrices):
     session_labels = ['T1', 'T2', 'T3', 'T4']
