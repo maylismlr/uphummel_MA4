@@ -12,13 +12,13 @@ def load_data_T1_only(folder_path, rois):
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
     # Keep only the first appearance of each StudyID
-    regression_info = regression_info.drop_duplicates(subset=["StudyID"], keep="first")
+    #regression_info = regression_info.drop_duplicates(subset=["study_id"], keep="first")
 
     # Merge on StudyID
-    rsfMRI_info = rsfMRI_info.merge(regression_info, on="StudyID", how="left")
+    #rsfMRI_info = rsfMRI_info.merge(regression_info, on="study_id", how="left")
     
     # Extract last 4 characters of StudyID
-    valid_subjects = rsfMRI_info["StudyID"].astype(str).str[-4:].tolist()
+    valid_subjects = rsfMRI_info["study_id"].astype(str).str[-4:].tolist()
 
     # Match folders with valid StudyIDs
     subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
