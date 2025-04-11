@@ -49,8 +49,15 @@ def load_data_T1_only(folder_path, rois):
 
     return t1_matrices, rsfMRI_full_info, rsfMRI_info, subjects
 
+def get_valid_subjects(folder_path):
+    # Keep subjects in subject list that have both T1 and T3
+    subjects = [sub for sub in os.listdir(folder_path) if not sub.startswith('.')]
+    t1_subjects = [sub for sub in subjects if 'T1' in sub]
+    t3_subjects = [sub for sub in subjects if 'T3' in sub]
+    valid_subjects = set(t1_subjects) & set(t3_subjects)
+    return valid_subjects
 
-def load_data(folder_path, rois):
+def load_data(folder_path, rois, valid_subjects=None):
     # Load Excel files
     rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")
     regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
@@ -115,10 +122,12 @@ def load_data(folder_path, rois):
     
     return df, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
 
-'''
-SERT PLUS A RIEN
 
 def matrices_to_wide_df(subject_matrices):
+    # Load Excel files
+    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
+    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
+    
     session_labels = ['T1', 'T2', 'T3', 'T4']
     rows = []
 
@@ -137,8 +146,11 @@ def matrices_to_wide_df(subject_matrices):
         if col not in df.columns:
             df[col] = None
 
+    # Merge the DataFrame with rsfMRI_info on subject_id
+    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
+    
     return df
-'''
+
 '''
 DOESN'T WORK CORRECTLY
 
