@@ -5,6 +5,12 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+# for clustering
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_score
+
 def load_data_T1_only(folder_path, rois):
     # Load Excel files
     rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")  
@@ -46,15 +52,10 @@ def load_data_T1_only(folder_path, rois):
 
 def load_data(folder_path, rois):
     # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")['subject_id', 'Lesioned hemisphere', 'Lesion location']  
+    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")
     regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
-
-    # Keep only the first appearance of each subject_id
-    #regression_info = regression_info.drop_duplicates(subset=["subject_id"], keep="first")
-
-    # Merge on subject_id
-    #rsfMRI_info = rsfMRI_info.merge(regression_info, on="subject_id", how="left")
+    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
     
     # Extract last 4 characters of subject_id
     valid_subjects = rsfMRI_info["subject_id"].astype(str).str[-4:].tolist()
@@ -110,9 +111,12 @@ def load_data(folder_path, rois):
             df[col] = None
     
     # Merge the DataFrame with rsfMRI_info on subject_id
-    df = df.merge(rsfMRI_info, on="subject_id", how="left")
+    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
     
     return df, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
+
+'''
+SERT PLUS A RIEN
 
 def matrices_to_wide_df(subject_matrices):
     session_labels = ['T1', 'T2', 'T3', 'T4']
@@ -134,7 +138,7 @@ def matrices_to_wide_df(subject_matrices):
             df[col] = None
 
     return df
-
+'''
 '''
 DOESN'T WORK CORRECTLY
 
@@ -234,4 +238,43 @@ def plot_all_subject_matrices(folder_path, rois):
             axes[row_idx, col_idx].axis("off")
 
     plt.tight_layout()
+    plt.show()
+
+def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
+    # Preprocess categorical columns
+    matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
+    matrices_encoded = pd.get_dummies(matrices[categorical_cols_name], drop_first=True)
+
+    # Extract numerical column
+    numerical_cols = matrices[numerical_cols_names].fillna(0).values.reshape(-1, 1)
+
+    # Flatten the upper triangle of T1_matrix
+    baseline_matrices = matrices['T1_matrix']
+
+    def flatten_upper(mat):
+        mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
+        return mat[np.triu_indices_from(mat, k=1)]
+
+    X_matrix = np.array([flatten_upper(m) for m in baseline_matrices])
+
+    # Concatenate all features
+    X_combined = np.hstack([X_matrix, matrices_encoded.values, numerical_cols])
+
+    # Scale the combined features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_combined)
+
+    # Perform clustering
+    kmeans = KMeans(n_clusters=2, random_state=42)
+    labels = kmeans.fit_predict(X_scaled)
+
+    # PCA for visualization
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_scaled)
+
+    plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis')
+    plt.title("Patient Clusters at Baseline")
+    plt.xlabel("PCA 1")
+    plt.ylabel("PCA 2")
+    plt.colorbar(label="Cluster")
     plt.show()
