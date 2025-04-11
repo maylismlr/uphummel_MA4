@@ -51,10 +51,10 @@ def load_data(folder_path, rois):
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
     # Keep only the first appearance of each StudyID
-    regression_info = regression_info.drop_duplicates(subset=["StudyID"], keep="first")
+    #regression_info = regression_info.drop_duplicates(subset=["StudyID"], keep="first")
 
     # Merge on StudyID
-    rsfMRI_info = rsfMRI_info.merge(regression_info, on="StudyID", how="left")
+    #rsfMRI_info = rsfMRI_info.merge(regression_info, on="StudyID", how="left")
     
     # Extract last 4 characters of StudyID
     valid_subjects = rsfMRI_info["StudyID"].astype(str).str[-4:].tolist()
@@ -92,6 +92,23 @@ def load_data(folder_path, rois):
         if ordered_matrices:
             subject_matrices[sub] = ordered_matrices
 
+    rows = []
+
+    for subject_id, matrices in subject_matrices.items():
+        row = {"subject_id": subject_id}
+        for idx, matrix in enumerate(matrices):
+            if idx < len(session_order):
+                row[f"{session_order[idx]}_matrix"] = matrix
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    
+    # Make sure all session columns are present, even if some are missing
+    for session in session_order:
+        col = f"{session}_matrix"
+        if col not in df.columns:
+            df[col] = None
+    
     return subject_matrices, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
 
 def matrices_to_wide_df(subject_matrices):
