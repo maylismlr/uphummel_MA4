@@ -49,13 +49,6 @@ def load_data_T1_only(folder_path, rois):
 
     return t1_matrices, rsfMRI_full_info, rsfMRI_info, subjects
 
-def get_valid_subjects(folder_path):
-    # Keep subjects in subject list that have both T1 and T3
-    subjects = [sub for sub in os.listdir(folder_path) if not sub.startswith('.')]
-    t1_subjects = [sub for sub in subjects if 'T1' in sub]
-    t3_subjects = [sub for sub in subjects if 'T3' in sub]
-    valid_subjects = set(t1_subjects) & set(t3_subjects)
-    return valid_subjects
 
 def load_data(folder_path, rois, valid_subjects=None):
     # Load Excel files
@@ -398,3 +391,18 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     plt.ylabel("PCA 2")
     plt.colorbar(label="Cluster")
     plt.show()
+    
+    score = silhouette_score(X_scaled, labels)
+    print(f"Silhouette score: {score}")
+    
+    # Create a DataFrame with subject IDs and their corresponding cluster labels
+    subject_cluster_df = pd.DataFrame({'subject_id': subject_ids, 'cluster': labels})
+
+    # Group subjects by cluster label
+    grouped_subjects = subject_cluster_df.groupby('cluster')['subject_id'].apply(list).to_dict()
+
+    # Print subjects in each cluster
+    for cluster, subjects in grouped_subjects.items():
+        print(f"Cluster {cluster}: {subjects}")
+    
+    return None
