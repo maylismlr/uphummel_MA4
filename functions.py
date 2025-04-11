@@ -353,6 +353,10 @@ def plot_all_subject_matrices(folder_path, rois):
     plt.tight_layout()
     plt.show()
 
+def flatten_upper(mat):
+        mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
+        return mat[np.triu_indices_from(mat, k=1)]
+
 def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     # Preprocess categorical columns
     matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
@@ -363,10 +367,6 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
 
     # Flatten the upper triangle of T1_matrix
     baseline_matrices = matrices['T1_matrix']
-
-    def flatten_upper(mat):
-        mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
-        return mat[np.triu_indices_from(mat, k=1)]
 
     X_matrix = np.array([flatten_upper(m) for m in baseline_matrices])
 
