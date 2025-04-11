@@ -378,7 +378,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     X_scaled = scaler.fit_transform(X_combined)
 
     # Perform clustering
-    kmeans = KMeans(n_clusters=2, random_state=42)
+    kmeans = KMeans(n_clusters=3, random_state=42)
     labels = kmeans.fit_predict(X_scaled)
 
     # PCA for visualization
@@ -407,4 +407,10 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     for cluster, subjects in grouped_subjects.items():
         print(f"Cluster {cluster}: {subjects}")
     
-    return None
+    # Create a DataFrame mapping subject IDs to their cluster labels
+    subject_cluster_df = pd.DataFrame({'subject_id': subject_ids, 'cluster': labels})
+
+    # Merge the cluster DataFrame with the original DataFrame (matrices)
+    matrices_with_clusters = matrices.merge(subject_cluster_df, on='subject_id', how='left')
+    
+    return matrices_with_clusters
