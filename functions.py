@@ -395,6 +395,8 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     score = silhouette_score(X_scaled, labels)
     print(f"Silhouette score: {score}")
     
+    subject_ids = matrices.loc[baseline_matrices.index, 'subject_id'].tolist()
+    
     # Create a DataFrame with subject IDs and their corresponding cluster labels
     subject_cluster_df = pd.DataFrame({'subject_id': subject_ids, 'cluster': labels})
 
