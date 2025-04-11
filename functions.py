@@ -1,6 +1,9 @@
 import os
-import pandas as pd
 import scipy.io
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def load_data_T1_only(folder_path, rois):
     # Load Excel files
@@ -112,9 +115,8 @@ def matrices_to_wide_df(subject_matrices):
 
     return df
 
-import os
-import pandas as pd
-import scipy.io
+'''
+DOESN'T WORK CORRECTLY
 
 def load_data_wide(folder_path, rois):
     # Load Excel files
@@ -165,3 +167,51 @@ def load_data_wide(folder_path, rois):
     df_matrices = pd.DataFrame(data_rows)
 
     return df_matrices, rsfMRI_full_info, rsfMRI_info, df_matrices['subject_id'].tolist()
+'''
+
+def plot_all_subject_matrices(folder_path, rois):
+    # Load subjects and metadata
+    subject_matrices, rsfMRI_full_info, rsfMRI_info, subjects = load_data(folder_path, rois)
+
+    # Prepare a dictionary with all .mat files per subject
+    subject_files = {
+        sub: [f for f in os.listdir(os.path.join(folder_path, sub)) if f.endswith('.mat')]
+        for sub in subjects
+    }
+
+    # Determine the maximum number of columns needed (most .mat files in any subject)
+    max_columns = max(len(files) for files in subject_files.values())
+    num_rows = len(subjects)
+
+    # Create figure and axes
+    fig, axes = plt.subplots(num_rows, max_columns, figsize=(max_columns * 4, num_rows * 4), squeeze=False)
+
+    # Loop through subjects and plot
+    for row_idx, (sub, files) in enumerate(subject_files.items()):
+        sub_folder = os.path.join(folder_path, sub)
+
+        for col_idx, mat_file in enumerate(files):
+            mat_file_path = os.path.join(sub_folder, mat_file)
+
+            # Try to extract session info
+            session_info = mat_file[22:24] if len(mat_file) >= 24 else "??"
+
+            # Load .mat file
+            mat_data = scipy.io.loadmat(mat_file_path)
+            df = pd.DataFrame(mat_data['CM'])
+
+            # Extract ROIs
+            df_only_rois = df.iloc[rois, rois]
+
+            # Plot heatmap
+            ax = axes[row_idx, col_idx]
+            sns.heatmap(df_only_rois, cmap="viridis", annot=False, square=True,
+                        xticklabels=False, yticklabels=False, ax=ax)
+            ax.set_title(f"{sub} - Session: {session_info}", fontsize=10)
+
+        # Hide unused axes in the row
+        for col_idx in range(len(files), max_columns):
+            axes[row_idx, col_idx].axis("off")
+
+    plt.tight_layout()
+    plt.show()
