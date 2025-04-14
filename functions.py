@@ -15,120 +15,25 @@ from sklearn.metrics import silhouette_score
 from scipy.stats import ttest_rel
 from statsmodels.stats.multitest import multipletests
 
-
-def load_data_T1_only(folder_path, rois):
+def load_data(folder_path, rois, type = 'all'):
+    '''
+    Load data from .mat files in the specified folder. Either get all matrices (enter type = 'all'), 
+    or only T1 matrices (enter type = 't1_only'), or only T1 and T3 matrices matched (enter type = 't1_t3_matched),
+    or only T1 and T4 matrices matched (enter type = 't1_t4_matched), or all T1 and T3 matrices (enter type = 't1_t3'),
+    or or all T1 and T4 matrices (enter type = 't1_t4').
+    '''
     # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")  
     regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
     # Keep only the first appearance of each subject_id
-    regression_info = regression_info.drop_duplicates(subset=["subject_id"], keep="first")
+    subject_info = regression_info.copy().drop_duplicates(subset=["subject_id"], keep="first")
 
     # Merge on subject_id
-    rsfMRI_info = rsfMRI_info.merge(regression_info, on="subject_id", how="left")
+    rsfMRI_full_info = rsfMRI_full_info.merge(subject_info, on="subject_id", how="left")
+    rsfMRI_full_info = rsfMRI_full_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','Gender','Age','Education_level','Combined', 'Bilateral']]
     
     # Extract last 4 characters of subject_id
-    valid_subjects = rsfMRI_info["subject_id"].astype(str).str[-4:].tolist()
-
-    # Match folders with valid subject_id
-    subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
-
-    # Store T1 matrices in a list
-    t1_matrices = []
-
-    for sub in subjects:
-        sub_folder = os.path.join(folder_path, sub)
-
-        # Get all .mat files containing 'T1'
-        t1_files = [f for f in os.listdir(sub_folder) if f.endswith('.mat') and 'T1' in f]
-
-        for mat_file in t1_files:
-            mat_file_path = os.path.join(sub_folder, mat_file)
-            mat_data = scipy.io.loadmat(mat_file_path)
-
-            if 'CM' in mat_data:
-                df = pd.DataFrame(mat_data['CM'])
-                df_only_rois = df.iloc[rois, rois]
-                t1_matrices.append(df_only_rois)
-
-    return t1_matrices, rsfMRI_full_info, rsfMRI_info, subjects
-
-
-def load_data(folder_path, rois, valid_subjects=None):
-    # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")
-    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
-    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
-    
-    # Extract last 4 characters of subject_id
-    valid_subjects = rsfMRI_info["subject_id"].astype(str).str[-4:].tolist()
-
-    # Match folders with valid subject_id
-    subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
-
-    # Define session order
-    session_order = ['T1', 'T2', 'T3', 'T4']
-
-    # Store matrices: { subject_id: [matrix_T1, matrix_T2, matrix_T3, matrix_T4] }
-    subject_matrices = {}
-
-    for sub in subjects:
-        sub_folder = os.path.join(folder_path, sub)
-        files = [f for f in os.listdir(sub_folder) if f.endswith('.mat')]
-
-        # Prepare a session-to-matrix map for this subject
-        session_matrices = {session: None for session in session_order}
-
-        for mat_file in files:
-            for session in session_order:
-                if session in mat_file:
-                    mat_file_path = os.path.join(sub_folder, mat_file)
-                    mat_data = scipy.io.loadmat(mat_file_path)
-
-                    if 'CM' in mat_data:
-                        df = pd.DataFrame(mat_data['CM'])
-                        df_only_rois = df.iloc[rois, rois]
-                        session_matrices[session] = df_only_rois
-                    break  # Don't keep checking once a match is found
-
-        # Keep them in order (T1 to T4)
-        ordered_matrices = [session_matrices[session] for session in session_order if session_matrices[session] is not None]
-        if ordered_matrices:
-            subject_matrices[sub] = ordered_matrices
-
-    rows = []
-
-    for subject_id, matrices in subject_matrices.items():
-        row = {"subject_id": subject_id}
-        for idx, matrix in enumerate(matrices):
-            if idx < len(session_order):
-                row[f"{session_order[idx]}_matrix"] = matrix
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    
-    # Make sure all session columns are present, even if some are missing
-    for session in session_order:
-        col = f"{session}_matrix"
-        if col not in df.columns:
-            df[col] = None
-    
-    # Merge the DataFrame with rsfMRI_info on subject_id
-    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
-    
-    return df, rsfMRI_full_info, rsfMRI_info, list(subject_matrices.keys())
-
-def load_data_2(folder_path, rois, valid_subjects=None):
-    
-    # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")
-    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
-    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
-
-    # Extract valid subjects from last 4 characters
     valid_subjects = rsfMRI_full_info["subject_id"].astype(str).str[-4:].tolist()
 
     # Match folders with valid subject_id
@@ -141,60 +46,8 @@ def load_data_2(folder_path, rois, valid_subjects=None):
         files = [f for f in os.listdir(sub_folder) if f.endswith('.mat')]
 
         t1_matrix = None
+        t2_matrix = None
         t3_matrix = None
-
-        for mat_file in files:
-            mat_file_path = os.path.join(sub_folder, mat_file)
-
-            # Load the matrix
-            mat_data = scipy.io.loadmat(mat_file_path)
-            if 'CM' not in mat_data:
-                continue
-
-            matrix = pd.DataFrame(mat_data['CM']).iloc[rois, rois]
-
-            if 'T1' in mat_file:
-                t1_matrix = matrix
-            elif 'T3' in mat_file:
-                t3_matrix = matrix
-
-        # Only keep subjects with both T1 and T3
-        if t1_matrix is not None and t3_matrix is not None:
-            data_rows.append({
-                "subject_id": sub,
-                "T1_matrix": t1_matrix,
-                "T3_matrix": t3_matrix
-            })
-
-    # Create dataframe
-    df = pd.DataFrame(data_rows)
-
-    # Merge metadata
-    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
-
-    return df, rsfMRI_full_info, rsfMRI_info, df["subject_id"].tolist()
-
-def load_data_3(folder_path, rois, valid_subjects=None):
-    
-    # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")
-    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
-    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
-
-    # Extract valid subjects from last 4 characters
-    valid_subjects = rsfMRI_full_info["subject_id"].astype(str).str[-4:].tolist()
-
-    # Match folders with valid subject_id
-    subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
-
-    data_rows = []
-
-    for sub in subjects:
-        sub_folder = os.path.join(folder_path, sub)
-        files = [f for f in os.listdir(sub_folder) if f.endswith('.mat')]
-
-        t1_matrix = None
         t4_matrix = None
 
         for mat_file in files:
@@ -209,154 +62,83 @@ def load_data_3(folder_path, rois, valid_subjects=None):
 
             if 'T1' in mat_file:
                 t1_matrix = matrix
+            elif 'T2' in mat_file:
+                t2_matrix = matrix
+            elif 'T3' in mat_file:
+                t3_matrix = matrix
             elif 'T4' in mat_file:
                 t4_matrix = matrix
 
-        # Only keep subjects with both T1 and T4
-        if t1_matrix is not None and t4_matrix is not None:
-            data_rows.append({
-                "subject_id": sub,
-                "T1_matrix": t1_matrix,
-                "T4_matrix": t4_matrix
-            })
+        data_rows.append({
+            "subject_id": sub,
+            "T1_matrix": t1_matrix,
+            "T2_matrix": t2_matrix,
+            "T3_matrix": t3_matrix,
+            "T4_matrix": t4_matrix
+        })
 
     # Create dataframe
     df = pd.DataFrame(data_rows)
-
-    # Merge metadata
-    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
-
-    return df, rsfMRI_full_info, rsfMRI_info, df["subject_id"].tolist()
-
-
-def matrices_to_wide_df(subject_matrices):
-    # Load Excel files
-    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_merged_info = regression_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3']]
     
-    session_labels = ['T1', 'T2', 'T3', 'T4']
-    rows = []
-
-    for subject_id, matrices in subject_matrices.items():
-        row = {"subject_id": subject_id}
-        for idx, matrix in enumerate(matrices):
-            if idx < len(session_labels):
-                row[f"{session_labels[idx]}_matrix"] = matrix
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    
-    # Make sure all session columns are present, even if some are missing
-    for session in session_labels:
-        col = f"{session}_matrix"
-        if col not in df.columns:
-            df[col] = None
-
     # Merge the DataFrame with rsfMRI_info on subject_id
-    df = df.merge(rsfMRI_merged_info, on="subject_id", how="left")
+    df = df.merge(rsfMRI_full_info, on="subject_id", how="left")
     
-    return df
+    if type == 'T1':
+        t1_matrices = df.drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
 
-'''
-DOESN'T WORK CORRECTLY
-
-def load_data_wide(folder_path, rois):
-    # Load Excel files
-    rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")  
-    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
-
-    # Keep only the first appearance of each StudyID
-    regression_info = regression_info.drop_duplicates(subset=["StudyID"], keep="first")
-
-    # Merge on StudyID
-    rsfMRI_info = rsfMRI_info.merge(regression_info, on="StudyID", how="left")
+        return t1_matrices, regression_info, rsfMRI_full_info, subjects
     
-    # Extract last 4 characters of StudyID
-    valid_subjects = rsfMRI_info["StudyID"].astype(str).str[-4:].tolist()
+    elif type == 't1_t3_matched':
+        # keep only rows where both T1 and T3 matrices are not None
+        t1_t3_matrices = df.dropna(subset=['T1_matrix', 'T3_matrix'])
+        t1_t3_matrices = t1_t3_matrices.drop(columns=['T2_matrix', 'T4_matrix'])
+        
+        return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
+    
+    elif type == 't1_t4_matched':
+        # keep only rows where both T1 and T3 matrices are not None
+        t1_t4_matrices = df.dropna(subset=['T1_matrix', 'T4_matrix'])
+        t1_t4_matrices = t1_t4_matrices.drop(columns=['T2_matrix', 'T3_matrix'])
+        
+        return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
+    
+    elif type == 't1_t3':
+        # keep only rows where T1 or T3 matrices are not None
+        t1_t3_matrices = df.drop(columns=['T2_matrix', 'T4_matrix'])
+        
+        return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
+    
+    elif type == 't1_t4':
+        # keep only rows where T1 or T4 matrices are not None
+        t1_t4_matrices = df.drop(columns=['T2_matrix', 'T3_matrix'])
+        
+        return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
+    else:
 
-    # Match folders with valid StudyIDs
-    subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
+        return df, regression_info, rsfMRI_full_info, subjects
 
-    # Define session order
-    session_order = ['T1', 'T2', 'T3', 'T4']
-
-    # Store rows for wide-format DataFrame
-    data_rows = []
-
-    for sub in subjects:
-        sub_folder = os.path.join(folder_path, sub)
-        files = [f for f in os.listdir(sub_folder) if f.endswith('.mat')]
-
-        # Prepare a dictionary with all session matrices set to None initially
-        row = {"subject_id": sub, **{f"{s}_matrix": None for s in session_order}}
-
-        for mat_file in files:
-            for session in session_order:
-                if session in mat_file:
-                    mat_file_path = os.path.join(sub_folder, mat_file)
-                    mat_data = scipy.io.loadmat(mat_file_path)
-
-                    if 'CM' in mat_data:
-                        df = pd.DataFrame(mat_data['CM'])
-                        df_only_rois = df.iloc[rois, rois]
-                        row[f"{session}_matrix"] = df_only_rois
-                    break  # Session match found; move to next file
-
-        data_rows.append(row)
-
-    # Create the wide-format DataFrame
-    df_matrices = pd.DataFrame(data_rows)
-
-    return df_matrices, rsfMRI_full_info, rsfMRI_info, df_matrices['subject_id'].tolist()
-'''
-
-def plot_all_subject_matrices(folder_path, rois):
-    # Load subjects and metadata
-    subject_matrices, rsfMRI_full_info, rsfMRI_info, subjects = load_data(folder_path, rois)
-
-    # Prepare a dictionary with all .mat files per subject
-    subject_files = {
-        sub: [f for f in os.listdir(os.path.join(folder_path, sub)) if f.endswith('.mat')]
-        for sub in subjects
-    }
-
-    # Determine the maximum number of columns needed (most .mat files in any subject)
-    max_columns = max(len(files) for files in subject_files.values())
-    num_rows = len(subjects)
-
-    # Create figure and axes
-    fig, axes = plt.subplots(num_rows, max_columns, figsize=(max_columns * 4, num_rows * 4), squeeze=False)
-
-    # Loop through subjects and plot
-    for row_idx, (sub, files) in enumerate(subject_files.items()):
-        sub_folder = os.path.join(folder_path, sub)
-
-        for col_idx, mat_file in enumerate(files):
-            mat_file_path = os.path.join(sub_folder, mat_file)
-
-            # Try to extract session info
-            session_info = mat_file[22:24] if len(mat_file) >= 24 else "??"
-
-            # Load .mat file
-            mat_data = scipy.io.loadmat(mat_file_path)
-            df = pd.DataFrame(mat_data['CM'])
-
-            # Extract ROIs
-            df_only_rois = df.iloc[rois, rois]
-
-            # Plot heatmap
-            ax = axes[row_idx, col_idx]
-            sns.heatmap(df_only_rois, cmap="viridis", annot=False, square=True,
-                        xticklabels=False, yticklabels=False, ax=ax)
-            ax.set_title(f"{sub} - Session: {session_info}", fontsize=10)
-
-        # Hide unused axes in the row
-        for col_idx in range(len(files), max_columns):
-            axes[row_idx, col_idx].axis("off")
-
+# plot the heatmap of the matrices
+def plot_all_subject_matrices(subject_matrices, subjects):
+    '''
+    go through all the subjects and plot the matrices as sns heatmaps, with each row being a subject 
+    and each column a timepoint
+    '''
+    num_subjects = len(subjects)
+    timepoints = ['T1', 'T2', 'T3', 'T4']
+    
+    fig, axes = plt.subplots(num_subjects, len(timepoints), figsize=(15, num_subjects * 3))
+    
+    for i, subject in enumerate(subjects):
+        for j, timepoint in enumerate(timepoints):
+            ax = axes[i, j] if num_subjects > 1 else axes[j]
+            matrix = subject_matrices.loc[subject, timepoint]
+            sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False)
+            ax.set_title(f'Subject {subject} - {timepoint}')
+            ax.axis('off')
+    
     plt.tight_layout()
-    plt.show()
+    plt.show();
+    
 
 def flatten_upper(mat):
         mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
@@ -395,7 +177,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     plt.xlabel("PCA 1")
     plt.ylabel("PCA 2")
     plt.colorbar(label="Cluster")
-    plt.show()
+    plt.show();
     
     score = silhouette_score(X_scaled, labels)
     print(f"Silhouette score: {score}")
@@ -430,6 +212,7 @@ def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
     t_array = np.stack(t_matrices)
 
     print("shape of T1 matrix: ", np.shape(t1_matrices))
+    print(f"shape of T{tp} matrix: ", np.shape(t_matrices))
     
     # Paired t-test
     t_stat, p_val = ttest_rel(t1_array, t_array, axis=0)
@@ -454,12 +237,12 @@ def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.tight_layout()
-    plt.show()
+    plt.show();
     
     return significant_matrix, p_vals_corrected, reject
 
 
-def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05, cluster=False):
+def sig_matrix_T1_T(df, rois, tp=3, alpha=0.05, cluster=False):
     n_rois = len(rois)
     results = {}
     if cluster == False:
@@ -494,7 +277,7 @@ def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05, cluster=False):
             plt.xlabel("ROIs")
             plt.ylabel("ROIs")
             plt.tight_layout()
-            plt.show()
+            plt.show();
 
         return results
     
@@ -517,6 +300,6 @@ def compute_FC_diff(df, tp=3):
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.tight_layout()
-    plt.show()
+    plt.show();
 
     return diff_array
