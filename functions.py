@@ -114,8 +114,8 @@ def load_data(folder_path, rois, type = 'all'):
         t1_t4_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix'])
         
         return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
-    else:
-        raise ValueError("Invalid type. Choose from 'all', 't1_only', 't1_t3', 't1_t4', 't1_t3_matched', or 't1_t4_matched'.")
+    
+    return df, regression_info, rsfMRI_full_info, subjects
 
 # plot the heatmap of the matrices
 def plot_all_subject_matrices(subject_matrices, subjects, type='t1_t3'):
