@@ -24,7 +24,7 @@ def main(type = 'all', cluster = False, num_clusters = 2):
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(all_matrices, subjects, folder_path, "all_matrices")
+        functions.plot_all_subject_matrices(all_matrices, subjects, type = type)
         
         if cluster == True:
             all_matrices_clustered = functions.cluster_and_plot(all_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
@@ -35,7 +35,7 @@ def main(type = 'all', cluster = False, num_clusters = 2):
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_matrices, subjects, folder_path, "all_matrices")
+        functions.plot_all_subject_matrices(t1_matrices, subjects, type = type)
         
         if cluster == True:
             t1_t3_matrices_clustered = functions.cluster_and_plot(t1_t3_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
@@ -46,13 +46,14 @@ def main(type = 'all', cluster = False, num_clusters = 2):
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t3_matrices, subjects, folder_path, "all_matrices")
+        functions.plot_all_subject_matrices(t1_t3_matrices, subjects, type = type)
         
-        # plot the significant differences between the matrices
-        print("Plotting significant differences...")
-        significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t3_matrices, alpha=0.05, cluster=cluster)
+        if cluster == False:
+            # plot the significant differences between the matrices
+            print("Plotting significant differences...")
+            significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t3_matrices, alpha=0.05, cluster=cluster)
         
-        if cluster == True:
+        elif cluster == True:
             t1_t3_matrices_clustered = functions.cluster_and_plot(t1_t3_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
             
             # plot the significant differences between the matrices
@@ -64,13 +65,14 @@ def main(type = 'all', cluster = False, num_clusters = 2):
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t4_matrices, subjects, folder_path, "all_matrices")
+        functions.plot_all_subject_matrices(t1_t4_matrices, subjects, type = type)
         
-        # plot the significant differences between the matrices
-        print("Plotting significant differences...")
-        significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t4_matrices, alpha=0.05, cluster=cluster)
+        if cluster == False:
+            # plot the significant differences between the matrices
+            print("Plotting significant differences...")
+            significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t4_matrices, alpha=0.05, cluster=cluster)
         
-        if cluster == True:
+        elif cluster == True:
             t1_t4_matrices_clustered = functions.cluster_and_plot(t1_t4_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
             
             # plot the significant differences between the matrices
@@ -82,13 +84,13 @@ def main(type = 'all', cluster = False, num_clusters = 2):
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t3_matched, subjects, folder_path, "all_matrices")
-        
-        # plot the significant differences between the matrices
-        print("Plotting significant differences...")
-        significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t3_matched, alpha=0.05, cluster=cluster)
+        functions.plot_all_subject_matrices(t1_t3_matched, subjects, type = type)
+        if cluster == False:
+            # plot the significant differences between the matrices
+            print("Plotting significant differences...")
+            significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t3_matched, alpha=0.05, cluster=cluster)
     
-        if cluster == True:
+        elif cluster == True:
             t1_t3_matched_clustered = functions.cluster_and_plot(t1_t3_matched, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
             
             # plot the significant differences between the matrices
@@ -100,13 +102,14 @@ def main(type = 'all', cluster = False, num_clusters = 2):
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t4_matched, subjects, folder_path, "all_matrices")
+        functions.plot_all_subject_matrices(t1_t4_matched, subjects, type = type)
         
-        # plot the significant differences between the matrices
-        print("Plotting significant differences...")
-        significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t4_matched, alpha=0.05, cluster=cluster)
+        if cluster == False:
+            # plot the significant differences between the matrices
+            print("Plotting significant differences...")
+            significant_matrix, p_vals_corrected, reject = functions.sig_matrix_T1_T(t1_t4_matched, alpha=0.05, cluster=cluster)
         
-        if cluster == True:
+        elif cluster == True:
             t1_t4_matched_clustered = functions.cluster_and_plot(t1_t4_matched, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
             
             # plot the significant differences between the matrices
@@ -115,8 +118,10 @@ def main(type = 'all', cluster = False, num_clusters = 2):
     
     else:
         raise ValueError("Invalid type. Choose from 'all', 't1_only', 't1_t3', 't1_t4', 't1_t3_matched', or 't1_t4_matched'.")
+    
+    return None
 
 
 if __name__ == "__main__":
     # Run the main function
-    main(type='all', cluster=True)
+    main(type='t1_t3', cluster=True, num_clusters=2)

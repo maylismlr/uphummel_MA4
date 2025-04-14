@@ -59,6 +59,7 @@ def load_data(folder_path, rois, type = 'all'):
                 continue
 
             matrix = pd.DataFrame(mat_data['CM']).iloc[rois, rois]
+            matrix = matrix.replace('None', np.nan)
 
             if 'T1' in mat_file:
                 t1_matrix = matrix
@@ -83,57 +84,67 @@ def load_data(folder_path, rois, type = 'all'):
     # Merge the DataFrame with rsfMRI_info on subject_id
     df = df.merge(rsfMRI_full_info, on="subject_id", how="left")
     
-    if type == 'T1':
-        t1_matrices = df.drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
+    if type == 't1_only':
+        t1_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
 
         return t1_matrices, regression_info, rsfMRI_full_info, subjects
     
     elif type == 't1_t3_matched':
         # keep only rows where both T1 and T3 matrices are not None
-        t1_t3_matrices = df.dropna(subset=['T1_matrix', 'T3_matrix'])
+        t1_t3_matrices = df.copy().dropna(subset=['T1_matrix', 'T3_matrix'])
         t1_t3_matrices = t1_t3_matrices.drop(columns=['T2_matrix', 'T4_matrix'])
         
         return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
     
     elif type == 't1_t4_matched':
         # keep only rows where both T1 and T3 matrices are not None
-        t1_t4_matrices = df.dropna(subset=['T1_matrix', 'T4_matrix'])
+        t1_t4_matrices = df.copy().dropna(subset=['T1_matrix', 'T4_matrix'])
         t1_t4_matrices = t1_t4_matrices.drop(columns=['T2_matrix', 'T3_matrix'])
         
         return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
     
     elif type == 't1_t3':
         # keep only rows where T1 or T3 matrices are not None
-        t1_t3_matrices = df.drop(columns=['T2_matrix', 'T4_matrix'])
+        t1_t3_matrices = df.copy().drop(columns=['T2_matrix', 'T4_matrix'])
         
         return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
     
     elif type == 't1_t4':
         # keep only rows where T1 or T4 matrices are not None
-        t1_t4_matrices = df.drop(columns=['T2_matrix', 'T3_matrix'])
+        t1_t4_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix'])
         
         return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
     else:
-
-        return df, regression_info, rsfMRI_full_info, subjects
+        raise ValueError("Invalid type. Choose from 'all', 't1_only', 't1_t3', 't1_t4', 't1_t3_matched', or 't1_t4_matched'.")
 
 # plot the heatmap of the matrices
-def plot_all_subject_matrices(subject_matrices, subjects):
+def plot_all_subject_matrices(subject_matrices, subjects, type='t1_t3'):
     '''
     go through all the subjects and plot the matrices as sns heatmaps, with each row being a subject 
-    and each column a timepoint
+    and each column a timepoint. The timepoints can be modulated based on the input.
     '''
     num_subjects = len(subjects)
-    timepoints = ['T1', 'T2', 'T3', 'T4']
+    
+    if type == 'all':
+        timepoints = ['T1', 'T2', 'T3', 'T4']
+    elif type == 't1_only':
+        timepoints = ['T1']
+    elif type == 't1_t3' or type == 't1_t3_matched':
+        timepoints = ['T1', 'T3']
+    elif type == 't1_t4' or type == 't1_t4_matched':
+        timepoints = ['T1', 'T4']
     
     fig, axes = plt.subplots(num_subjects, len(timepoints), figsize=(15, num_subjects * 3))
     
     for i, subject in enumerate(subjects):
         for j, timepoint in enumerate(timepoints):
             ax = axes[i, j] if num_subjects > 1 else axes[j]
-            matrix = subject_matrices.loc[subject, timepoint]
-            sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False)
-            ax.set_title(f'Subject {subject} - {timepoint}')
+            if timepoint in subject_matrices.columns:
+                matrix = subject_matrices.loc[subject, timepoint]
+                sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False)
+                ax.set_title(f'Subject {subject} - {timepoint}')
+            else:
+                ax.axis('off')  # Hide axes if timepoint is not available
             ax.axis('off')
     
     plt.tight_layout()
@@ -242,13 +253,12 @@ def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
     return significant_matrix, p_vals_corrected, reject
 
 
-def sig_matrix_T1_T(df, rois, tp=3, alpha=0.05, cluster=False):
-    n_rois = len(rois)
+def sig_matrix_T1_T(df, tp=3, alpha=0.05, clusters=False):
     results = {}
     if cluster == False:
         return get_sig_matrix(df, tp, alpha)
     
-    elif cluster == True:
+    elif clusters == True:
         for cluster in sorted(df['cluster'].unique()):
             print(f"\nAnalyzing Cluster {cluster}...")
 
