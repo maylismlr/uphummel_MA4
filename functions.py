@@ -11,6 +11,11 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
+# for statistical tests
+from scipy.stats import ttest_rel
+from statsmodels.stats.multitest import multipletests
+
+
 def load_data_T1_only(folder_path, rois):
     # Load Excel files
     rsfMRI_info = pd.read_excel("TiMeS_rsfMRI_info.xlsx", engine="openpyxl")  
@@ -357,7 +362,7 @@ def flatten_upper(mat):
         mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
         return mat[np.triu_indices_from(mat, k=1)]
 
-def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
+def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2):
     # Preprocess categorical columns
     matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
     matrices_encoded = pd.get_dummies(matrices[categorical_cols_name], drop_first=True)
@@ -378,7 +383,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     X_scaled = scaler.fit_transform(X_combined)
 
     # Perform clustering
-    kmeans = KMeans(n_clusters=3, random_state=42)
+    kmeans = KMeans(n_clusters=clusters, random_state=42)
     labels = kmeans.fit_predict(X_scaled)
 
     # PCA for visualization
@@ -414,3 +419,67 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name):
     matrices_with_clusters = matrices.merge(subject_cluster_df, on='subject_id', how='left')
     
     return matrices_with_clusters
+
+def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05):
+    n_rois = len(rois)
+    results = {}
+
+    for cluster in sorted(df['cluster'].unique()):
+        print(f"\nAnalyzing Cluster {cluster}...")
+
+        # Subset to current cluster
+        cluster_df = df[df['cluster'] == cluster]
+
+        # Ensure subjects have both T1 and T4
+        cluster_df = cluster_df.dropna(subset=['T1_matrix', f'T{tp}_matrix'])
+
+        if cluster_df.empty:
+            print(f" - No data for Cluster {cluster}")
+            continue
+
+        # Create lists of matrices
+        t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
+        t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix']]
+
+        # Optionally convert to numpy arrays (shape: [n_subjects, n_rois, n_rois])
+        X_T1 = np.stack(t1_matrices)
+        X_T = np.stack(t_matrices)
+
+        print("shape of T1 matrix: ", np.shape(t1_matrices))
+
+        # Paired t-test
+        t_stats, p_vals = ttest_rel(X_T1, X_T, axis=0)
+        
+        # Flatten p-values to 1D if needed
+        p_val_flat = p_val.ravel()
+
+        # FDR correction
+        reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='fdr_bh')
+        
+        p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
+        reject = reject.reshape(p_val.shape)
+
+        # Create significant matrix
+        significant_matrix = np.zeros_like(p_val, dtype=int)
+        significant_matrix[reject] = 1
+
+        # Create significant matrix
+        significant_matrix = np.zeros_like(p_val, dtype=int)
+        significant_matrix[reject] = 1
+
+        # Store results
+        results[cluster] = {
+            'signif_matrix': significant_matrix,
+            'p_corrected': p_vals_corrected,
+            'rejected': reject,
+        }
+
+        plt.figure(figsize=(10, 6))
+        sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
+        plt.title("Significance Heatmap (FDR-corrected)")
+        plt.xlabel("ROIs")
+        plt.ylabel("ROIs")
+        plt.tight_layout()
+        plt.show()
+
+    return results
