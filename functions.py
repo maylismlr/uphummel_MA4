@@ -106,13 +106,15 @@ def load_data(folder_path, rois, type = 'all'):
     elif type == 't1_t3':
         # keep only rows where T1 or T3 matrices are not None
         t1_t3_matrices = df.copy().drop(columns=['T2_matrix', 'T4_matrix'])
+        t1_t3_matrices = t1_t3_matrices[~(t1_t3_matrices['T1_matrix'].isna() & t1_t3_matrices['T3_matrix'].isna())]
         
         return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
     
     elif type == 't1_t4':
         # keep only rows where T1 or T4 matrices are not None
         t1_t4_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix'])
-        
+        t1_t4_matrices = t1_t4_matrices[~(t1_t4_matrices['T1_matrix'].isna() & t1_t4_matrices['T4_matrix'].isna())]
+
         return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
     
     return df, regression_info, rsfMRI_full_info, subjects
