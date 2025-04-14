@@ -488,7 +488,7 @@ def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05, cluster=False):
                 'rejected': reject,
             }
 
-            plt.figure(figsize=(10, 6))
+            plt.figure(figsize=(8, 4))
             sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
             plt.title("Significance Heatmap (FDR-corrected)")
             plt.xlabel("ROIs")
@@ -497,3 +497,26 @@ def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05, cluster=False):
             plt.show()
 
         return results
+    
+def compute_FC_diff(df, tp=3):
+    # Extract T1 and T4 matrices
+    t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
+    t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix']]
+
+    # Convert to numpy arrays (shape: [n_subjects, n_rois, n_rois])
+    t1_array = np.stack(t1_matrices)
+    t_array = np.stack(t_matrices)
+
+    # Compute difference
+    diff_array = t_array - t1_array
+    
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(diff_array.mean(axis=0), cmap='viridis', cbar=True, annot=False, square=True)
+    plt.title(f"Mean FC Difference (T{tp} - T1)")
+    plt.xlabel("ROIs")
+    plt.ylabel("ROIs")
+    plt.tight_layout()
+    plt.show()
+
+    return diff_array
