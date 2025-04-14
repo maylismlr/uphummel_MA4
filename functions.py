@@ -420,66 +420,80 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     
     return matrices_with_clusters
 
-def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05):
+def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
+    # Create lists of matrices
+    t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
+    t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix']]
+
+    # Optionally convert to numpy arrays (shape: [n_subjects, n_rois, n_rois])
+    t1_array = np.stack(t1_matrices)
+    t_array = np.stack(t_matrices)
+
+    print("shape of T1 matrix: ", np.shape(t1_matrices))
+    
+    # Paired t-test
+    t_stat, p_val = ttest_rel(t1_array, t_array, axis=0)
+
+    # Flatten p-values to 1D if needed
+    p_val_flat = p_val.ravel()
+
+    # FDR correction
+    reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='holm')
+
+    # Reshape corrected p-values and reject back to original shape if necessary
+    p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
+    reject = reject.reshape(p_val.shape)
+
+    # Create significant matrix
+    significant_matrix = np.zeros_like(p_val, dtype=int)
+    significant_matrix[reject] = 1
+
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
+    plt.title("Significance Heatmap (FDR-corrected)")
+    plt.xlabel("ROIs")
+    plt.ylabel("ROIs")
+    plt.tight_layout()
+    plt.show()
+    
+    return significant_matrix, p_vals_corrected, reject
+
+
+def compare_T1_T_by_cluster(df, rois, tp=3, alpha=0.05, cluster=False):
     n_rois = len(rois)
     results = {}
+    if cluster == False:
+        return get_sig_matrix(df, tp, alpha)
+    
+    elif cluster == True:
+        for cluster in sorted(df['cluster'].unique()):
+            print(f"\nAnalyzing Cluster {cluster}...")
 
-    for cluster in sorted(df['cluster'].unique()):
-        print(f"\nAnalyzing Cluster {cluster}...")
+            # Subset to current cluster
+            cluster_df = df[df['cluster'] == cluster]
 
-        # Subset to current cluster
-        cluster_df = df[df['cluster'] == cluster]
+            # Ensure subjects have both T1 and T4
+            cluster_df = cluster_df.dropna(subset=['T1_matrix', f'T{tp}_matrix'])
 
-        # Ensure subjects have both T1 and T4
-        cluster_df = cluster_df.dropna(subset=['T1_matrix', f'T{tp}_matrix'])
+            if cluster_df.empty:
+                print(f" - No data for Cluster {cluster}")
+                continue
 
-        if cluster_df.empty:
-            print(f" - No data for Cluster {cluster}")
-            continue
+            significant_matrix, p_vals_corrected, reject = get_sig_matrix(cluster_df, tp, alpha)
 
-        # Create lists of matrices
-        t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
-        t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix']]
+            # Store results
+            results[cluster] = {
+                'signif_matrix': significant_matrix,
+                'p_corrected': p_vals_corrected,
+                'rejected': reject,
+            }
 
-        # Optionally convert to numpy arrays (shape: [n_subjects, n_rois, n_rois])
-        X_T1 = np.stack(t1_matrices)
-        X_T = np.stack(t_matrices)
+            plt.figure(figsize=(10, 6))
+            sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
+            plt.title("Significance Heatmap (FDR-corrected)")
+            plt.xlabel("ROIs")
+            plt.ylabel("ROIs")
+            plt.tight_layout()
+            plt.show()
 
-        print("shape of T1 matrix: ", np.shape(t1_matrices))
-
-        # Paired t-test
-        t_stats, p_vals = ttest_rel(X_T1, X_T, axis=0)
-        
-        # Flatten p-values to 1D if needed
-        p_val_flat = p_val.ravel()
-
-        # FDR correction
-        reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='fdr_bh')
-        
-        p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
-        reject = reject.reshape(p_val.shape)
-
-        # Create significant matrix
-        significant_matrix = np.zeros_like(p_val, dtype=int)
-        significant_matrix[reject] = 1
-
-        # Create significant matrix
-        significant_matrix = np.zeros_like(p_val, dtype=int)
-        significant_matrix[reject] = 1
-
-        # Store results
-        results[cluster] = {
-            'signif_matrix': significant_matrix,
-            'p_corrected': p_vals_corrected,
-            'rejected': reject,
-        }
-
-        plt.figure(figsize=(10, 6))
-        sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
-        plt.title("Significance Heatmap (FDR-corrected)")
-        plt.xlabel("ROIs")
-        plt.ylabel("ROIs")
-        plt.tight_layout()
-        plt.show()
-
-    return results
+        return results
