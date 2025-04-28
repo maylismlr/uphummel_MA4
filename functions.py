@@ -163,12 +163,13 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     Remark: T1_matrices cannot be 'None' here !
     '''
     
+    matrices = matrices.dropna(subset=['T1_matrix'])  # Handle NaN values
+    
     # Preprocess categorical columns
     matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
     matrices_encoded = pd.get_dummies(matrices[categorical_cols_name], drop_first=True)
     print(matrices_encoded.columns)
-    matrices_encoded = matrices_encoded.dropna(subset=['T1_matrix'])  # Handle NaN values
-
+    
     # Extract numerical column
     numerical_cols = matrices[numerical_cols_names].fillna(0).values.reshape(-1, 1)
 
