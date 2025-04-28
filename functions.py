@@ -165,7 +165,8 @@ def flatten_upper(mat):
 def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):
     ''' 
     uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
-    Remark: T1_matrices cannot be 'None' here !
+    Remark: T1_matrices cannot be 'None' here ! So we drop the rows that don't have T1 matrices => a little more data
+    than t1_t_matched, but not much.
     '''
     
     matrices = matrices.dropna(subset=['T1_matrix'])  # Handle NaN values
@@ -317,6 +318,8 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     """
     Full pipeline to flatten FC matrices, combine clinical features, reduce dimensionality, cluster, and return cluster labels.
     Works only on available T1 matrices (subjects missing T1 will be automatically excluded).
+    Remark: T1_matrices cannot be 'None' here ! So we drop the rows that don't have T1 matrices => a little more data
+    than t1_t_matched, but not much.
     """
     # Remove subjects where the T1_matrix is missing
     df = df[df[matrix_column].notnull()].copy()
@@ -387,8 +390,12 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     # Final KMeans
     kmeans_final = KMeans(n_clusters=best_k, random_state=random_state)
     clusters = kmeans_final.fit_predict(pca_features)
+    
+    # Attach cluster labels to the cleaned dataframe
+    df_with_clusters = df.copy()
+    df_with_clusters['cluster'] = clusters
 
-    return clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names
+    return df_with_clusters, clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names
 
 
 # STATISTICAL TESTS
