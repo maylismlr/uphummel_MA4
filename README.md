@@ -6,3 +6,6 @@
 - plotly
 - os
 - openpyxl
+- matplotlib
+
+

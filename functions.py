@@ -12,7 +12,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
 # for statistical tests
-from scipy.stats import ttest_rel
+from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
 
 def load_data(folder_path, rois, type = 'all'):
@@ -221,7 +221,8 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     return matrices_with_clusters
 
 def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
-    # Create lists of matrices
+    
+    # Create timepoint-specific lists of matrices, which have a column for T1 and the other chosen timepoint
     t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
     t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix']]
 
@@ -233,7 +234,8 @@ def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
     print(f"shape of T{tp} matrix: ", np.shape(t_matrices))
     
     # Paired t-test
-    t_stat, p_val = ttest_rel(t1_array, t_array, axis=0)
+    t_stat, p_val = ttest_ind(t1_array, t_array, axis=0) #This is a two-sided test for the null hypothesis that 2 independent samples have identical average (expected) values. 
+                                                         #This test assumes that the populations have identical variances by default.
 
     # Flatten p-values to 1D if needed
     p_val_flat = p_val.ravel()
