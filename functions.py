@@ -27,14 +27,15 @@ def load_data(folder_path, rois, type = 'all'):
     rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
     # Keep only the first appearance of each subject_id
-    subject_info = regression_info.copy().drop_duplicates(subset=["subject_id"], keep="first")
+    subject_info = regression_info.copy().drop_duplicates(subset=["subject_full_id"], keep="first")
 
     # Merge on subject_id
     rsfMRI_full_info = rsfMRI_full_info.merge(subject_info, on="subject_id", how="left")
-    rsfMRI_full_info = rsfMRI_full_info[['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','Gender','Age','Education_level','Combined', 'Bilateral']]
+    rsfMRI_full_info = rsfMRI_full_info[['subject_full_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','Gender','Age','Education_level','Combined', 'Bilateral']]
+    rsfMRI_full_info['subject_id'] = rsfMRI_full_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
     
     # Extract last 4 characters of subject_id
-    valid_subjects = rsfMRI_full_info["subject_id"].astype(str).str[-4:].tolist()
+    valid_subjects = rsfMRI_full_info["subject_id"].tolist()
 
     # Match folders with valid subject_id
     subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
@@ -72,6 +73,7 @@ def load_data(folder_path, rois, type = 'all'):
 
         data_rows.append({
             "subject_id": sub,
+            "subject_id_full": sub,
             "T1_matrix": t1_matrix,
             "T2_matrix": t2_matrix,
             "T3_matrix": t3_matrix,
