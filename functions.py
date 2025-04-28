@@ -23,8 +23,8 @@ def load_data(folder_path, rois, type = 'all'):
     or or all T1 and T4 matrices (enter type = 't1_t4').
     '''
     # Load Excel files
-    regression_info = pd.read_excel("TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
+    regression_info = pd.read_excel("data/TiMeS_regression_info_processed.xlsx", engine="openpyxl")
+    rsfMRI_full_info = pd.read_excel("data/TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
 
     # Keep only the first appearance of each subject_full_id
     subject_info = regression_info.copy().drop_duplicates(subset=["subject_full_id"], keep="first")
