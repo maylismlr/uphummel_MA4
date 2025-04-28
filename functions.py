@@ -223,30 +223,40 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     
     return matrices_with_clusters
 
-def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
+def get_sig_matrix(df, tp=3, alpha=0.05, cluster=False):
+    # Create lists of matrices
+    t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix'] if matrix is not None]
+    t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix'] if matrix is not None]
+
+    print("shape of T1 matrices:", np.shape(t1_matrices))
+    print(f"shape of T{tp} matrices:", np.shape(t_matrices))
     
-    # Create timepoint-specific lists of matrices, which have a column for T1 and the other chosen timepoint
-    t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
-    t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix']]
+    # Assume matrices are all square and of the same size
+    n_rois = t1_matrices[0].shape[0]
 
-    # Optionally convert to numpy arrays (shape: [n_subjects, n_rois, n_rois])
-    t1_array = np.stack(t1_matrices)
-    t_array = np.stack(t_matrices)
+    # Initialize arrays to store t-stats and p-values
+    t_stat = np.zeros((n_rois, n_rois))
+    p_val = np.ones((n_rois, n_rois))
 
-    print("shape of T1 matrix: ", np.shape(t1_matrices))
-    print(f"shape of T{tp} matrix: ", np.shape(t_matrices))
-    
-    # Paired t-test
-    t_stat, p_val = ttest_ind(t1_array, t_array, axis=0) #This is a two-sided test for the null hypothesis that 2 independent samples have identical average (expected) values. 
-                                                         #This test assumes that the populations have identical variances by default.
+    # Loop over each cell in the 2D matrix
+    for i in range(n_rois):
+        for j in range(n_rois):
+            # Collect all values at position (i, j)
+            t1_values = np.array([mat[i, j] for mat in t1_matrices])
+            t_values = np.array([mat[i, j] for mat in t_matrices])
 
-    # Flatten p-values to 1D if needed
+            # Perform independent t-test
+            stat, p = ttest_ind(t1_values, t_values, equal_var=True)
+            t_stat[i, j] = stat
+            p_val[i, j] = p
+
+    # Flatten p-values for correction
     p_val_flat = p_val.ravel()
 
-    # FDR correction
+    # FDR correction (Holm method)
     reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='holm')
 
-    # Reshape corrected p-values and reject back to original shape if necessary
+    # Reshape back
     p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
     reject = reject.reshape(p_val.shape)
 
@@ -254,15 +264,17 @@ def get_sig_matrix(df, tp = 3, alpha=0.05, cluster = False):
     significant_matrix = np.zeros_like(p_val, dtype=int)
     significant_matrix[reject] = 1
 
-    plt.figure(figsize=(10, 6))
+    # Plot heatmap
+    plt.figure(figsize=(6, 5))
     sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
-    plt.title("Significance Heatmap (FDR-corrected)")
+    plt.title(f"Significance Heatmap T1 vs T{tp} (FDR-corrected)")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.tight_layout()
-    plt.show();
-    
+    plt.show()
+
     return significant_matrix, p_vals_corrected, reject
+
 
 
 def sig_matrix_T1_T(df, tp=3, alpha=0.05, clusters=False):
