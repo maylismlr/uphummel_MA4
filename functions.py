@@ -343,7 +343,7 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
     # Prepare categorical features
     if categorical_cols is not None and len(categorical_cols) > 0:
-        df[categorical_cols] = df[categorical_cols].fillna('Unknown')  # Handle missing categorical values
+        df[categorical_cols] = df[categorical_cols].fillna('Unknown').astype(str)  # Handle missing categorical values
         ohe = OneHotEncoder(sparse_output=False, drop='first')
         cat_features = ohe.fit_transform(df[categorical_cols])
     else:
