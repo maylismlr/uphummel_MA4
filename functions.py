@@ -316,38 +316,22 @@ def generate_feature_names(selected_rois_labels, all_roi_labels, numerical_cols,
 def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numerical_cols=None, categorical_cols=None, n_components=20, max_clusters=10, random_state=42):
     """
     Full pipeline to flatten FC matrices, combine clinical features, reduce dimensionality, cluster, and return cluster labels.
-    We only work with striatum ROIs to cluster the patients, as the are the regions we are interested in and will
-    be looking at later.
-
-    Args:
-        df (pd.DataFrame): Input dataframe with subjects
-        matrix_column (str): Column containing FC matrices (e.g., 'T1')
-        numerical_cols (list): List of numerical column names
-        categorical_cols (list): List of categorical column names
-        n_components (int): Number of PCA components
-        max_clusters (int): Maximum number of clusters to test
-        random_state (int): Random seed
-
-    Returns:
-        clusters (np.array): Cluster labels
-        silhouette_scores (dict): Silhouette scores for different k
-        pca_features (np.array): Reduced features (after PCA)
-        scaler (StandardScaler): Scaler object (fitted)
-        pca (PCA): PCA object (fitted)
+    Works only on available T1 matrices (subjects missing T1 will be automatically excluded).
     """
+    # Remove subjects where the T1_matrix is missing
+    df = df[df[matrix_column].notnull()].copy()
+
     # Get list of all ROI labels from the first FC matrix
     all_roi_labels = df[matrix_column].iloc[0].index.tolist()
     
     # Flatten T1 FC matrices
-    print("Flattening FC matrices...")
+    print(f"Flattening FC matrices on {len(df)} subjects...")
     flattened_fc = df[matrix_column].apply(lambda mat: flatten_selected_rois(mat, selected_rois_labels))
     fc_features = np.vstack(flattened_fc.values)
 
     # Prepare numerical features
     if numerical_cols is not None:
         num_features_df = df[numerical_cols].copy()
-        
-        # Simple check and imputation
         if num_features_df.isnull().values.any():
             print("[INFO] Missing numerical values detected. Imputing with column means...")
             imputer = SimpleImputer(strategy='mean')
@@ -358,8 +342,8 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
         num_features = np.array([]).reshape(len(df), 0)
 
     # Prepare categorical features
-    df[categorical_cols] = df[categorical_cols].fillna('Unknown')  # Handle missing values
     if categorical_cols is not None and len(categorical_cols) > 0:
+        df[categorical_cols] = df[categorical_cols].fillna('Unknown')  # Handle missing categorical values
         ohe = OneHotEncoder(sparse_output=False, drop='first')
         cat_features = ohe.fit_transform(df[categorical_cols])
     else:
@@ -368,7 +352,6 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     # Concatenate all features
     all_features = np.hstack([fc_features, num_features, cat_features])
     feature_names = generate_feature_names(selected_rois_labels, all_roi_labels, numerical_cols, categorical_cols, ohe)
-
 
     # Standardize
     scaler = StandardScaler()
@@ -406,6 +389,7 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     clusters = kmeans_final.fit_predict(pca_features)
 
     return clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names
+
 
 # STATISTICAL TESTS
 def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label=""):
