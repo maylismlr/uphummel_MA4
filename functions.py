@@ -17,6 +17,9 @@ from sklearn.impute import SimpleImputer
 from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
 
+# for prettiness <3
+from tqdm import tqdm
+
 def load_data(folder_path, rois, type = 'all'):
     '''
     Load data from .mat files in the specified folder. Either get all matrices (enter type = 'all'), 
@@ -141,7 +144,7 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
     
     fig, axes = plt.subplots(num_subjects, len(timepoints), figsize=(15, num_subjects * 3))
     
-    for i, subject in enumerate(subjects):
+    for i, subject in tqdm(enumerate(subjects), total=len(subjects)):
         for j, timepoint in enumerate(timepoints):
             ax = axes[i, j] if num_subjects > 1 else axes[j]
             if timepoint in subject_matrices.columns:
@@ -169,7 +172,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     than t1_t_matched, but not much.
     '''
     
-    matrices = matrices.dropna(subset=['T1_matrix'])  # Handle NaN values
+    matrices = matrices.dropna(subset=['T1_matrix']).copy()  # Handle NaN values
     
     # Preprocess categorical columns
     matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
@@ -263,7 +266,7 @@ def compute_feature_importance(features, clusters, feature_names, top_features=1
         sns.barplot(data=importance.head(top_features), x='mean_difference', y='feature')
         plt.title("Top 10 discriminative connectivities between clusters")
         plt.xlabel("Absolute Mean Difference")
-        plt.show()
+        plt.show();
 
     return importance
 
@@ -381,7 +384,7 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     plt.ylabel('Silhouette Score')
     plt.title('Silhouette Score vs Number of Clusters')
     plt.grid(True)
-    plt.show()
+    plt.show();
 
     # Choose best k
     best_k = max(silhouette_scores, key=silhouette_scores.get)
@@ -409,7 +412,7 @@ def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label="")
     p_val = np.ones((n_rois, n_rois))
 
     # Loop over each cell (i,j)
-    for i in range(n_rois):
+    for i in tqdm(range(n_rois)):
         for j in range(n_rois):
             t1_values = np.array([mat[i, j] for mat in t1_matrices])
             t_values = np.array([mat[i, j] for mat in t_matrices])
@@ -444,7 +447,7 @@ def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label="")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.tight_layout()
-    plt.show()
+    plt.show();
 
     return significant_matrix, p_vals_corrected, reject
 
@@ -565,3 +568,77 @@ def compute_FC_diff(df, rois, tp=3):
     plt.show();
 
     return diff_array
+
+# SUMMARY OF T TESTS
+def load_roi_labels(filepath_csv):
+    """
+    Load ROI labels from a CSV file and return a mapping {Python_index: RegionLongName}.
+    
+    Args:
+        filepath_csv (str): Path to the HCP-MMP1_RegionsCorticesList_379.csv file
+    
+    Returns:
+        roi_mapping (dict): Mapping from 0-based Python indices to RegionLongName
+    """
+    # Load the CSV file
+    roi_df = pd.read_csv(filepath_csv)
+
+    # Check if necessary columns are present
+    expected_columns = {'#ID', 'RegionLongName'}
+    if not expected_columns.issubset(roi_df.columns):
+        raise ValueError(f"The CSV file must contain the columns {expected_columns}. Found columns: {roi_df.columns.tolist()}")
+
+    # Build mapping: Python index (0-based) -> RegionLongName
+    roi_mapping = {row['#ID'] - 1: row['RegionLongName'] for _, row in roi_df.iterrows()}
+
+    return roi_mapping
+
+
+def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_mapping, cluster_label=None, alpha=0.05):
+    """
+    Summarize significant differences into a readable DataFrame.
+
+    Args:
+        p_values_matrix (np.array): Matrix of p-values
+        effect_size_matrix (np.array): Matrix of effect sizes
+        roi_mapping (dict): Mapping ROI index -> region name
+        cluster_label (int or None): Cluster index. If None, no cluster column is added.
+        alpha (float): Significance threshold after correction (default 0.05)
+
+    Returns:
+        summary_df (pd.DataFrame): DataFrame of significant results
+    """
+    n_rois = p_values_matrix.shape[0]
+    rows = []
+
+    for i in range(n_rois):
+        for j in range(i + 1, n_rois):  # upper triangle only
+            p_val = p_values_matrix[i, j]
+            if p_val < alpha:
+                roi_1 = roi_mapping.get(i, f"ROI_{i}")
+                roi_2 = roi_mapping.get(j, f"ROI_{j}")
+                effect = effect_size_matrix[i, j]
+                entry = {
+                    'ROI_1': roi_1,
+                    'ROI_2': roi_2,
+                    'Comparison': f"{roi_1} - {roi_2}",
+                    'p_value': p_val,
+                    'effect_size': effect
+                }
+                if cluster_label is not None:
+                    entry['Cluster'] = cluster_label
+                rows.append(entry)
+
+    summary_df = pd.DataFrame(rows)
+
+    # Put 'Cluster' first if it exists
+    if cluster_label is not None and not summary_df.empty:
+        cols = ['Cluster', 'ROI_1', 'ROI_2', 'Comparison', 'p_value', 'effect_size']
+        summary_df = summary_df[cols]
+    else:
+        cols = ['ROI_1', 'ROI_2', 'Comparison', 'p_value', 'effect_size']
+        summary_df = summary_df[cols]
+
+    summary_df = summary_df.sort_values(by='p_value', ascending=True).reset_index(drop=True)
+
+    return summary_df
