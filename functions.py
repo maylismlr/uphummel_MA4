@@ -6,10 +6,11 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 # for clustering
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
+from sklearn.model_selection import train_test_split
 
 # for statistical tests
 from scipy.stats import ttest_rel, ttest_ind
@@ -158,11 +159,13 @@ def flatten_upper(mat):
         mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
         return mat[np.triu_indices_from(mat, k=1)]
 
+'''
+ANCIENNE VERSION
 def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):
-    '''
+    
     uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
     Remark: T1_matrices cannot be 'None' here !
-    '''
+    
     
     matrices = matrices.dropna(subset=['T1_matrix'])  # Handle NaN values
     
@@ -223,9 +226,178 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     # Merge the cluster DataFrame with the original DataFrame (matrices)
     matrices_with_clusters = matrices.merge(subject_cluster_df, on='subject_id', how='left')
     
-    return matrices_with_clusters
+    return matrices_with_clusters'''
+
+# CLUSTERING FUNCTIONS
+def compute_feature_importance(features, clusters, feature_names, top_features=10, plot=True):
+    """
+    Compute feature importance by comparing mean feature values across clusters.
+
+    Args:
+        features (np.array): Feature matrix after flattening (no PCA)
+        clusters (np.array): Cluster labels
+        feature_names (list): Names of the features
+
+    Returns:
+        importance_df (pd.DataFrame): Features sorted by absolute mean difference
+    """
+    df = pd.DataFrame(features, columns=feature_names)
+    df['cluster'] = clusters
+
+    mean_by_cluster = df.groupby('cluster').mean()
+    if mean_by_cluster.shape[0] != 2:
+        print("Warning: more than 2 clusters! Using difference between max and min clusters.")
+        diff = mean_by_cluster.max() - mean_by_cluster.min()
+    else:
+        diff = mean_by_cluster.iloc[0] - mean_by_cluster.iloc[1]
+
+    importance = pd.DataFrame({
+        'feature': feature_names,
+        'mean_difference': diff.abs()
+    }).sort_values(by='mean_difference', ascending=False)
+    
+    if plot:
+        plt.figure(figsize=(10,6))
+        sns.barplot(data=importance.head(top_features), x='mean_difference', y='feature')
+        plt.title("Top 10 discriminative connectivities between clusters")
+        plt.xlabel("Absolute Mean Difference")
+        plt.show()
+
+    return importance
 
 
+def flatten_selected_rois(fc_matrix, selected_rois_labels):
+    """
+    Flatten connectivities from selected ROIs by label (not by index).
+    Args:
+        fc_matrix (pd.DataFrame): FC matrix with ROI labels as index and columns.
+        selected_rois_labels (list): List of ROI labels to select (e.g., [362, 363, ...])
+    """
+    flattened = []
+    for src_label in selected_rois_labels:
+        # Get all connections from this ROI to others
+        connections = fc_matrix.loc[src_label, :]  # accès par label
+        connections = connections.drop(labels=src_label, errors='ignore')  # enlever self-connection
+        flattened.append(connections.values)
+    return np.concatenate(flattened)
+
+
+def generate_feature_names(selected_rois_labels, all_roi_labels, numerical_cols, categorical_cols, ohe):
+    """
+    Generate feature names corresponding to flattened FC features + numerical + categorical features.
+    
+    Args:
+        selected_rois_labels (list): List of selected source ROIs labels.
+        all_roi_labels (list): List of all ROI labels (both rows and columns of the FC matrix).
+        numerical_cols (list): List of numerical variable names.
+        categorical_cols (list): List of categorical variable names.
+        ohe (OneHotEncoder): Fitted OneHotEncoder object.
+
+    Returns:
+        feature_names (list): List of all feature names.
+    """
+    roi_connection_names = []
+    for src_label in selected_rois_labels:
+        for tgt_label in all_roi_labels:
+            if src_label != tgt_label:
+                roi_connection_names.append(f"{src_label}-{tgt_label}")
+
+    # For numerical features
+    numerical_names = list(numerical_cols)
+
+    # For categorical features (after one-hot encoding)
+    categorical_names = list(ohe.get_feature_names_out(categorical_cols))
+
+    feature_names = roi_connection_names + numerical_names + categorical_names
+    return feature_names
+
+
+def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numerical_cols=None, categorical_cols=None, n_components=20, max_clusters=10, random_state=42):
+    """
+    Full pipeline to flatten FC matrices, combine clinical features, reduce dimensionality, cluster, and return cluster labels.
+    We only work with striatum ROIs to cluster the patients, as the are the regions we are interested in and will
+    be looking at later.
+
+    Args:
+        df (pd.DataFrame): Input dataframe with subjects
+        matrix_column (str): Column containing FC matrices (e.g., 'T1')
+        numerical_cols (list): List of numerical column names
+        categorical_cols (list): List of categorical column names
+        n_components (int): Number of PCA components
+        max_clusters (int): Maximum number of clusters to test
+        random_state (int): Random seed
+
+    Returns:
+        clusters (np.array): Cluster labels
+        silhouette_scores (dict): Silhouette scores for different k
+        pca_features (np.array): Reduced features (after PCA)
+        scaler (StandardScaler): Scaler object (fitted)
+        pca (PCA): PCA object (fitted)
+    """
+    # Get list of all ROI labels from the first FC matrix
+    all_roi_labels = df[matrix_column].iloc[0].index.tolist()
+    
+    # Flatten T1 FC matrices
+    print("Flattening FC matrices...")
+    flattened_fc = df[matrix_column].apply(lambda mat: flatten_selected_rois(mat, selected_rois_labels))
+    fc_features = np.vstack(flattened_fc.values)
+
+    # Prepare numerical features
+    if numerical_cols is not None:
+        num_features = df[numerical_cols].values
+    else:
+        num_features = np.array([]).reshape(len(df), 0)
+
+    # Prepare categorical features
+    if categorical_cols is not None and len(categorical_cols) > 0:
+        ohe = OneHotEncoder(sparse_output=False, drop='first')
+        cat_features = ohe.fit_transform(df[categorical_cols])
+    else:
+        cat_features = np.array([]).reshape(len(df), 0)
+
+    # Concatenate all features
+    all_features = np.hstack([fc_features, num_features, cat_features])
+    feature_names = generate_feature_names(selected_rois_labels, all_roi_labels, numerical_cols, categorical_cols, ohe)
+
+
+    # Standardize
+    scaler = StandardScaler()
+    all_features_scaled = scaler.fit_transform(all_features)
+
+    # PCA reduction
+    print("Applying PCA...")
+    pca = PCA(n_components=n_components, random_state=random_state)
+    pca_features = pca.fit_transform(all_features_scaled)
+
+    # Find best k (number of clusters)
+    silhouette_scores = {}
+    print("Testing different cluster numbers...")
+    for k in range(2, max_clusters + 1):
+        km = KMeans(n_clusters=k, random_state=random_state)
+        labels = km.fit_predict(pca_features)
+        score = silhouette_score(pca_features, labels)
+        silhouette_scores[k] = score
+
+    # Plot silhouette scores
+    plt.figure(figsize=(8,5))
+    plt.plot(list(silhouette_scores.keys()), list(silhouette_scores.values()), marker='o')
+    plt.xlabel('Number of clusters')
+    plt.ylabel('Silhouette Score')
+    plt.title('Silhouette Score vs Number of Clusters')
+    plt.grid(True)
+    plt.show()
+
+    # Choose best k
+    best_k = max(silhouette_scores, key=silhouette_scores.get)
+    print(f"Best number of clusters according to silhouette score: {best_k}")
+
+    # Final KMeans
+    kmeans_final = KMeans(n_clusters=best_k, random_state=random_state)
+    clusters = kmeans_final.fit_predict(pca_features)
+
+    return clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names
+
+# STATISTICAL TESTS
 def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label=""):
     '''
     Analyzes the matrices and computes the significance matrix for the function underneath.
