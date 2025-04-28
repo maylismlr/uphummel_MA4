@@ -11,6 +11,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
 
 # for statistical tests
 from scipy.stats import ttest_rel, ttest_ind
@@ -161,11 +162,10 @@ def flatten_upper(mat):
 
 '''
 ANCIENNE VERSION
-def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):
-    
-    uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
-    Remark: T1_matrices cannot be 'None' here !
-    
+def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):'''
+'''uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
+    Remark: T1_matrices cannot be 'None' here !'''
+'''
     
     matrices = matrices.dropna(subset=['T1_matrix'])  # Handle NaN values
     
@@ -175,12 +175,12 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     print(matrices_encoded.columns)
     
     # Extract numerical column
-    numerical_cols = matrices[numerical_cols_names].fillna(0).values.reshape(-1, 1)
+    numerical_cols = matrices[numerical_cols_names].fillna(0).values # not sure if this is the right way to handle missing values
 
     # Flatten the upper triangle of T1_matrix
     baseline_matrices = matrices['T1_matrix']
 
-    X_matrix = np.array([flatten_upper(m) for m in baseline_matrices])
+    X_matrix = np.array([functions.flatten_upper(m) for m in baseline_matrices])
 
     # Concatenate all features
     X_combined = np.hstack([X_matrix, matrices_encoded.values, numerical_cols])
@@ -344,11 +344,20 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
     # Prepare numerical features
     if numerical_cols is not None:
-        num_features = df[numerical_cols].values
+        num_features_df = df[numerical_cols].copy()
+        
+        # Simple check and imputation
+        if num_features_df.isnull().values.any():
+            print("[INFO] Missing numerical values detected. Imputing with column means...")
+            imputer = SimpleImputer(strategy='mean')
+            num_features = imputer.fit_transform(num_features_df)
+        else:
+            num_features = num_features_df.values
     else:
         num_features = np.array([]).reshape(len(df), 0)
 
     # Prepare categorical features
+    df[categorical_cols] = df[categorical_cols].fillna('Unknown')  # Handle missing values
     if categorical_cols is not None and len(categorical_cols) > 0:
         ohe = OneHotEncoder(sparse_output=False, drop='first')
         cat_features = ohe.fit_transform(df[categorical_cols])
