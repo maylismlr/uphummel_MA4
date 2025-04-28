@@ -160,12 +160,13 @@ def flatten_upper(mat):
         mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
         return mat[np.triu_indices_from(mat, k=1)]
 
-'''
-ANCIENNE VERSION
-def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):'''
-'''uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
-    Remark: T1_matrices cannot be 'None' here !'''
-'''
+
+# ANCIENNE VERSION
+def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):
+    ''' 
+    uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
+    Remark: T1_matrices cannot be 'None' here !
+    '''
     
     matrices = matrices.dropna(subset=['T1_matrix'])  # Handle NaN values
     
@@ -226,7 +227,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     # Merge the cluster DataFrame with the original DataFrame (matrices)
     matrices_with_clusters = matrices.merge(subject_cluster_df, on='subject_id', how='left')
     
-    return matrices_with_clusters'''
+    return matrices_with_clusters
 
 # CLUSTERING FUNCTIONS
 def compute_feature_importance(features, clusters, feature_names, top_features=10, plot=True):
