@@ -73,7 +73,6 @@ def load_data(folder_path, rois, type = 'all'):
 
         data_rows.append({
             "subject_id": sub,
-            "subject_id_full": sub,
             "T1_matrix": t1_matrix,
             "T2_matrix": t2_matrix,
             "T3_matrix": t3_matrix,
