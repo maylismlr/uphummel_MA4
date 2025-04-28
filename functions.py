@@ -121,7 +121,7 @@ def load_data(folder_path, rois, type = 'all'):
     return df, regression_info, rsfMRI_full_info, subjects
 
 # plot the heatmap of the matrices
-def plot_all_subject_matrices(subject_matrices, subjects, type='t1_t3'):
+def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
     '''
     go through all the subjects and plot the matrices as sns heatmaps, with each row being a subject 
     and each column a timepoint. The timepoints can be modulated based on the input.
@@ -144,12 +144,12 @@ def plot_all_subject_matrices(subject_matrices, subjects, type='t1_t3'):
             ax = axes[i, j] if num_subjects > 1 else axes[j]
             if timepoint in subject_matrices.columns:
                 matrix = subject_matrices.loc[subject, timepoint]
-                sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False)
+                sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False, xticklabels=rois, yticklabels=rois)
                 ax.set_title(f'Subject {subject} - {timepoint}')
             else:
                 ax.axis('off')  # Hide axes if timepoint is not available
             ax.axis('off')
-    
+
     plt.tight_layout()
     plt.show();
     
@@ -160,6 +160,7 @@ def flatten_upper(mat):
 
 def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2):
     '''
+    uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
     Remark: T1_matrices cannot be 'None' here !
     '''
     
@@ -168,7 +169,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     # Preprocess categorical columns
     matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
     matrices_encoded = pd.get_dummies(matrices[categorical_cols_name], drop_first=True)
-    print(matrices_encoded.columns)
+    #print(matrices_encoded.columns)
     
     # Extract numerical column
     numerical_cols = matrices[numerical_cols_names].fillna(0).values.reshape(-1, 1)
@@ -223,7 +224,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     
     return matrices_with_clusters
 
-def get_sig_matrix(df, tp=3, alpha=0.05, cluster=False):
+def get_sig_matrix(df, rois, tp=3, correction = True, alpha=0.05, cluster=False):
     # Create lists of matrices
     t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix'] if matrix is not None]
     t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix'] if matrix is not None]
@@ -231,14 +232,14 @@ def get_sig_matrix(df, tp=3, alpha=0.05, cluster=False):
     print("shape of T1 matrices:", np.shape(t1_matrices))
     print(f"shape of T{tp} matrices:", np.shape(t_matrices))
     
-    # Assume matrices are all square and of the same size
-    n_rois = t1_matrices[0].shape[0]
+    # All matrices are square and of the same size
+    n_rois = len(rois)
 
     # Initialize arrays to store t-stats and p-values
     t_stat = np.zeros((n_rois, n_rois))
     p_val = np.ones((n_rois, n_rois))
 
-    # Loop over each cell in the 2D matrix
+    # Loop over each cell in the 2D matrix to be able to perform the tests with different number of subjects for each timepoint
     for i in range(n_rois):
         for j in range(n_rois):
             # Collect all values at position (i, j)
@@ -253,8 +254,13 @@ def get_sig_matrix(df, tp=3, alpha=0.05, cluster=False):
     # Flatten p-values for correction
     p_val_flat = p_val.ravel()
 
-    # FDR correction (Holm method)
-    reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='holm')
+    # Apply FDR correction if specified
+    if correction:
+        reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='fdr_bh')
+    else:
+        p_vals_corrected = p_val_flat
+        reject = np.zeros_like(p_val_flat, dtype=bool)
+        reject[p_vals_corrected < alpha] = True
 
     # Reshape back
     p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
@@ -266,8 +272,8 @@ def get_sig_matrix(df, tp=3, alpha=0.05, cluster=False):
 
     # Plot heatmap
     plt.figure(figsize=(6, 5))
-    sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
-    plt.title(f"Significance Heatmap T1 vs T{tp} (FDR-corrected)")
+    sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=False, square=True, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
+    plt.title(f"Significance Heatmap T1 vs T{tp} (FDR-corrected {correction})")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.tight_layout()
@@ -275,6 +281,110 @@ def get_sig_matrix(df, tp=3, alpha=0.05, cluster=False):
 
     return significant_matrix, p_vals_corrected, reject
 
+def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label=""):
+    '''
+    Analyzes the matrices and computes the significance matrix for the function underneath.
+    '''
+    # Initialize arrays to store t-stats and p-values
+    n_rois = len(rois)
+    t_stat = np.zeros((n_rois, n_rois))
+    p_val = np.ones((n_rois, n_rois))
+
+    # Loop over each cell (i,j)
+    for i in range(n_rois):
+        for j in range(n_rois):
+            t1_values = np.array([mat[i, j] for mat in t1_matrices])
+            t_values = np.array([mat[i, j] for mat in t_matrices])
+
+            # Perform independent t-test
+            stat, p = ttest_ind(t1_values, t_values, equal_var=True)
+            t_stat[i, j] = stat
+            p_val[i, j] = p
+
+    # Flatten p-values for correction
+    p_val_flat = p_val.ravel()
+
+    if correction:
+        reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='fdr_bh')
+    else:
+        p_vals_corrected = p_val_flat
+        reject = np.zeros_like(p_val_flat, dtype=bool)
+        reject[p_vals_corrected < alpha] = True
+
+    # Reshape
+    p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
+    reject = reject.reshape(p_val.shape)
+
+    # Create significance matrix
+    significant_matrix = np.zeros_like(p_val, dtype=int)
+    significant_matrix[reject] = 1
+
+    # Plot
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=False, square=True, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
+    plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
+    plt.xlabel("ROIs")
+    plt.ylabel("ROIs")
+    plt.tight_layout()
+    plt.show()
+
+    return significant_matrix, p_vals_corrected, reject
+
+def get_sig_matrix(df, rois, tp=3, correction=True, alpha=0.05, cluster=False):
+    '''
+    Computes the significance matrix for T1 vs T{tp} matrices, with or without clustering.
+    '''
+
+    results = {}
+
+    if not cluster:
+        # Whole dataset
+        t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix'] if matrix is not None]
+        t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix'] if matrix is not None]
+
+        print("Shape of T1 matrices:", np.shape(t1_matrices))
+        print(f"Shape of T{tp} matrices:", np.shape(t_matrices))
+
+        if not t1_matrices or not t_matrices:
+            raise ValueError("No matrices available for T1 or T{tp}.")
+
+        n_rois = len(rois)
+
+        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, rois, label=f"T1 vs T{tp}", correction, alpha)
+
+        return significant_matrix, p_vals_corrected, reject
+
+    else:
+        # By cluster
+        clusters = sorted(df['cluster'].dropna().unique())
+
+        for clust in clusters:
+            print(f"\nAnalyzing Cluster {clust}...")
+
+            cluster_df = df[df['cluster'] == clust]
+            cluster_df = cluster_df.dropna(subset=['T1_matrix', f'T{tp}_matrix'])
+
+            if cluster_df.empty:
+                print(f" - No data for Cluster {clust}")
+                continue
+
+            t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in cluster_df['T1_matrix']]
+            t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in cluster_df[f'T{tp}_matrix']]
+
+            print(f"Cluster {clust} - Shape of T1 matrices: {np.shape(t1_matrices)}")
+            print(f"Cluster {clust} - Shape of T{tp} matrices: {np.shape(t_matrices)}")
+
+            n_rois = len(rois)
+
+            significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, rois, label=f"Cluster {clust}: T1 vs T{tp}", correction, alpha)
+
+            results[clust] = {
+                'significant_matrix': significant_matrix,
+                'p_corrected': p_vals_corrected,
+                'reject': reject
+            }
+
+        return results
 
 
 def sig_matrix_T1_T(df, tp=3, alpha=0.05, clusters=False):
@@ -306,7 +416,7 @@ def sig_matrix_T1_T(df, tp=3, alpha=0.05, clusters=False):
             }
 
             plt.figure(figsize=(8, 4))
-            sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True)
+            sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
             plt.title("Significance Heatmap (FDR-corrected)")
             plt.xlabel("ROIs")
             plt.ylabel("ROIs")
