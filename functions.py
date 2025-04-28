@@ -181,7 +181,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     # Flatten the upper triangle of T1_matrix
     baseline_matrices = matrices['T1_matrix']
 
-    X_matrix = np.array([functions.flatten_upper(m) for m in baseline_matrices])
+    X_matrix = np.array([flatten_upper(m) for m in baseline_matrices])
 
     # Concatenate all features
     X_combined = np.hstack([X_matrix, matrices_encoded.values, numerical_cols])
