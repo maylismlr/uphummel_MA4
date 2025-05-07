@@ -723,37 +723,105 @@ def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_
     come from the same distribution. 
     """
     
-    cols_to_keep = ['subject_full_id','TimePoint'] + regression_info.loc[:, start_col:end_col].columns.tolist()
+    if split_L_R == True:
+        cols_to_keep = ['subject_full_id','TimePoint','Lesion_side'] + regression_info.loc[:, start_col:end_col].columns.tolist()
 
-    regression_info_part = regression_info[cols_to_keep]
+        regression_info_part = regression_info[cols_to_keep]
+        lesion_left = regression_info_part[regression_info_part['Lesion_side'] == 'L']
+        lesion_right = regression_info_part[regression_info_part['Lesion_side'] == 'R']
+        lesion_both = regression_info_part[regression_info_part['Lesion_side'] == 'R/L']
+        lesion_unknown = regression_info_part[~regression_info_part['Lesion_side'].isin(['L', 'R', 'R/L'])]
 
-    score_T1 = regression_info_part[regression_info_part.TimePoint == "T1"].copy().dropna()
-    score_T = regression_info_part[regression_info_part.TimePoint == f"T{tp}"].copy().dropna()
+        score_T1_L = lesion_left[lesion_left.TimePoint == "T1"].copy().dropna()
+        score_T_L = lesion_left[lesion_left.TimePoint == f"T3"].copy().dropna()
 
-    # Match score_T1 and score_T3 based on 'subject_full_id'
-    common_ids = set(score_T1['subject_full_id']).intersection(score_T['subject_full_id'])
-    score_T1_matched = score_T1[score_T1['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint'])
-    score_T_matched = score_T[score_T['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint'])
+        score_T1_R = lesion_right[lesion_right.TimePoint == "T1"].copy().dropna()
+        score_T_R = lesion_right[lesion_right.TimePoint == f"T3"].copy().dropna()
 
-    # Run Wilcoxon test across columns (axis=0)
-    stat, p = wilcoxon(score_T1_matched, score_T_matched, axis=0)
+        # Match score_T1 and score_T3 based on 'subject_full_id'
+        common_ids = set(score_T1_L['subject_full_id']).intersection(score_T_L['subject_full_id'])
+        score_T1_L_matched = score_T1_L[score_T1_L['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint','Lesion_side'])
+        score_T_L_matched = score_T_L[score_T_L['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint','Lesion_side'])
+        common_ids = set(score_T1_R['subject_full_id']).intersection(score_T_R['subject_full_id'])
+        score_T1_R_matched = score_T1_R[score_T1_R['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint','Lesion_side'])
+        score_T_R_matched = score_T_R[score_T_R['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint','Lesion_side'])
 
-    results = []
-    for col in score_T1_matched.columns:
-        try:
-            stat, pval = wilcoxon(score_T1_matched[col], score_T_matched[col])
-            results.append({
-                'Task': col, 
-                'n': len(score_T1_matched), 
-                'p-value': pval, 
-                'Statistically sig. change between TP': 'Yes' if pval < 0.05 else 'No'
-            })
-        except ValueError:
-            results.append({
-                'Task': col, 
-                'n': len(score_T1_matched), 
-                'p-value': None, 
-                'Statistically sig. change between TP': 'No'
-            })
 
-    return pd.DataFrame(results)
+        # Run Wilcoxon test across columns (axis=0)
+        stat_L, p_L = wilcoxon(score_T1_L_matched, score_T_L_matched, axis=0)
+        stat_R, p_R = wilcoxon(score_T1_R_matched, score_T_R_matched, axis=0)
+
+        results_L = []
+        results_R = []
+        for col in score_T1_L_matched.columns:
+            try:
+                stat, pval = wilcoxon(score_T1_L_matched[col], score_T_L_matched[col])
+                results_L.append({
+                    'Task': col, 
+                    'n': len(score_T1_L_matched), 
+                    'p-value': pval, 
+                    'Statistically sig. change between TP': 'Yes' if pval < 0.05 else 'No'
+                })
+            except ValueError:
+                results_L.append({
+                    'Task': col, 
+                    'n': len(score_T1_L_matched), 
+                    'p-value': None, 
+                    'Statistically sig. change between TP': 'No'
+                })
+        for col in score_T1_R_matched.columns:
+            try:
+                stat, pval = wilcoxon(score_T1_R_matched[col], score_T_R_matched[col])
+                results_R.append({
+                    'Task': col, 
+                    'n': len(score_T1_R_matched), 
+                    'p-value': pval, 
+                    'Statistically sig. change between TP': 'Yes' if pval < 0.05 else 'No'
+                })
+            except ValueError:
+                results_R.append({
+                    'Task': col, 
+                    'n': len(score_T1_R_matched), 
+                    'p-value': None, 
+                    'Statistically sig. change between TP': 'No'
+                })
+        results_L_df = pd.DataFrame(results_L)
+        results_R_df = pd.DataFrame(results_R)
+        
+        return results_L_df, results_R_df
+    
+    elif split_L_R == False:
+        cols_to_keep = ['subject_full_id','TimePoint'] + regression_info.loc[:, start_col:end_col].columns.tolist()
+
+        regression_info_part = regression_info[cols_to_keep]
+
+        score_T1 = regression_info_part[regression_info_part.TimePoint == "T1"].copy().dropna()
+        score_T = regression_info_part[regression_info_part.TimePoint == f"T{tp}"].copy().dropna()
+
+        # Match score_T1 and score_T3 based on 'subject_full_id'
+        common_ids = set(score_T1['subject_full_id']).intersection(score_T['subject_full_id'])
+        score_T1_matched = score_T1[score_T1['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint'])
+        score_T_matched = score_T[score_T['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint'])
+
+        # Run Wilcoxon test across columns (axis=0)
+        stat, p = wilcoxon(score_T1_matched, score_T_matched, axis=0)
+
+        results = []
+        for col in score_T1_matched.columns:
+            try:
+                stat, pval = wilcoxon(score_T1_matched[col], score_T_matched[col])
+                results.append({
+                    'Task': col, 
+                    'n': len(score_T1_matched), 
+                    'p-value': pval, 
+                    'Statistically sig. change between TP': 'Yes' if pval < 0.05 else 'No'
+                })
+            except ValueError:
+                results.append({
+                    'Task': col, 
+                    'n': len(score_T1_matched), 
+                    'p-value': None, 
+                    'Statistically sig. change between TP': 'No'
+                })
+
+        return pd.DataFrame(results)

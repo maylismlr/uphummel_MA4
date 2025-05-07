@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
-def main(type = 'all', cluster = False, num_clusters = 2, correction = False, alpha = 0.05):
+def main(type = 'all', cluster = False, num_clusters = 2, correction = False, alpha = 0.05, split_L_R = False):
     # Folder containing the data
     folder_path = "FC_matrices_times_wp11/"
     atlas_file_path = "data/HCP-MMP1_RegionsCorticesList_379.csv"
@@ -32,11 +32,17 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         functions.plot_all_subject_matrices(all_matrices, subjects, type = type)
         
         # perform longitudinal analysis on tasks
-        results_t3 = functions.motor_longitudinal(regression_info, tp = 3)
-        print(results_t3)
-        results_t4 = functions.motor_longitudinal(regression_info, tp = 4)
-        print(results_t4)
+        if split_L_R == True:
+            task_results_t3 = functions.motor_longitudinal(regression_info, tp = 3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            task_results_t4 = functions.motor_longitudinal(regression_info, tp = 4, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t3)
+            print(task_results_t4)
         
+        if split_L_R == False:
+            task_results_t3 = functions.motor_longitudinal(regression_info, tp = 3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            task_results_t4 = functions.motor_longitudinal(regression_info, tp = 4, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t3)
+            print(task_results_t4)
         
         if cluster == False:
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(all_matrices, rois, correction=correction, alpha=alpha, cluster=cluster)
@@ -82,8 +88,13 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         functions.plot_all_subject_matrices(t1_t3_matrices, subjects, rois=rois, type = type)
         
         # perform longitudinal analysis on tasks
-        results_t3 = functions.motor_longitudinal(regression_info, tp = 3)
-        print(results_t3)
+        if split_L_R == True:
+            task_results_t3 = functions.motor_longitudinal(regression_info, tp = 3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t3)
+        
+        if split_L_R == False:
+            task_results_t3 = functions.motor_longitudinal(regression_info, tp = 3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t3)
         
         if cluster == False:
             # plot the significant differences between the matrices
@@ -114,8 +125,13 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         functions.plot_all_subject_matrices(t1_t4_matrices, subjects, rois=rois, type = type)
         
         # perform longitudinal analysis on tasks
-        results_t4 = functions.motor_longitudinal(regression_info, tp = 4)
-        print(results_t4)
+        if split_L_R == True:
+            task_results_t4 = functions.motor_longitudinal(regression_info, tp = 4, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t4)
+        
+        if split_L_R == False:
+            task_results_t4 = functions.motor_longitudinal(regression_info, tp = 4, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t4)
         
         if cluster == False:
             # plot the significant differences between the matrices
@@ -146,9 +162,14 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         functions.plot_all_subject_matrices(t1_t3_matched, subjects, rois=rois, type = type)
         
         # perform longitudinal analysis on tasks
-        results_t3 = functions.motor_longitudinal(regression_info, tp = 3)
-        print(results_t3)
-        
+        if split_L_R == True:
+            task_results_t3 = functions.motor_longitudinal(regression_info, tp = 3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t3)
+            
+        if split_L_R == False:
+            task_results_t3 = functions.motor_longitudinal(regression_info, tp = 3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t3)
+            
         if cluster == False:
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
@@ -201,8 +222,13 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         functions.plot_all_subject_matrices(t1_t4_matched, subjects, rois=rois, type = type)
         
         # perform longitudinal analysis on tasks
-        results_t4 = functions.motor_longitudinal(regression_info, tp = 4)
-        print(results_t4)
+        if split_L_R == True:
+            task_results_t4 = functions.motor_longitudinal(regression_info, tp = 4, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t4)
+        
+        if split_L_R == False:
+            task_results_t4 = functions.motor_longitudinal(regression_info, tp = 4, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = split_L_R)
+            print(task_results_t4)
         
         if cluster == False:
             # plot the significant differences between the matrices
@@ -233,4 +259,4 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
 
 if __name__ == "__main__":
     # Run the main function
-    main(type='t1_t3', cluster=True, num_clusters=2)
+    main(type='t1_t3', cluster=True, num_clusters=2, split_L_R=True)
