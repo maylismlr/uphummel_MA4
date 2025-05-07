@@ -16,6 +16,7 @@ from sklearn.impute import SimpleImputer
 # for statistical tests
 from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
+from scipy.stats import shapiro
 
 # for prettiness <3
 from tqdm import tqdm
@@ -87,6 +88,9 @@ def load_data(folder_path, rois, type = 'all'):
     # Create dataframe
     df = pd.DataFrame(data_rows)
     
+    # plot mean FC matrices
+    plot_mean_FC_matrices(df, rois)
+    
     # Merge the DataFrame with rsfMRI_info on subject_id
     df = df.merge(rsfMRI_full_info, on="subject_id", how="left")
     
@@ -157,6 +161,25 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
 
     plt.tight_layout()
     plt.show();
+    
+def plot_mean_FC_matrices(matrices, rois):
+    """
+    Plot the mean FC matrix for a given timepoint.
+    
+    Args:
+        matrices (pd.DataFrame): DataFrame containing the matrices.
+        rois (list): List of ROIs.
+        timepoint (str): Timepoint to plot (e.g., 'T1', 'T2', 'T3', 'T4').
+    """
+    
+    for timepoint in matrices.columns:
+        mean_matrix = np.mean(matrices[timepoint].dropna().values, axis=0)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(mean_matrix, cmap='viridis', cbar=True, xticklabels=rois, yticklabels=rois)
+        plt.title(f'Mean FC Matrix of all subjects - {timepoint}')
+        plt.xlabel('ROIs')
+        plt.ylabel('ROIs')
+        plt.show()
     
 
 def flatten_upper(mat):
@@ -642,3 +665,33 @@ def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_m
     summary_df = summary_df.sort_values(by='p_value', ascending=True).reset_index(drop=True)
 
     return summary_df
+
+def test_nomality(df, alpha=0.05):
+    """
+    Perform Shapiro-Wilk test for normality on the data.
+    
+    Args:
+        data (array-like): Data to test for normality.
+        alpha (float): Significance level for the test.
+    
+    Returns:
+        bool: True if data is normally distributed, False otherwise.
+    """
+    df = df.copy().drop(columns=['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix', "subject_full_id",	"TimePoint", "Behavioral_assessment", "MRI", "Gender", "Age", "Education_level", "Lesion_side_old",	"Lesion_side", "Combined", "Bilateral", "Comments", "Stroke_location"])
+                        #drop (columns=['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','
+    results = {}
+    for col in df.select_dtypes(include=['float64', 'int64']).columns:
+        stat, p = shapiro(df[col].dropna())
+        results[col] = {'W': stat, 'p-value': p}
+
+    # Convert to DataFrame to view nicely
+    shapiro_df = pd.DataFrame(results).T
+    shapiro_df.index.name = 'Variable'
+    shapiro_df.reset_index(inplace=True)
+
+    # Mark whether the variable is normally distributed
+    shapiro_df['Normal? (p > 0.05)'] = shapiro_df['p-value'] > 0.05
+
+    print(shapiro_df)
+    
+    return shapiro_df

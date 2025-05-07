@@ -11,7 +11,7 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
     atlas_file_path = "data/HCP-MMP1_RegionsCorticesList_379.csv"
 
     # keep only ROIS
-    rois = [363, 364, 365, 368, 372, 373, 374, 377, 379, 361, 370, 362, 371, 10, 11, 12, 54, 56, 78, 96, 190, 191, 192, 234, 236, 258, 276, 8, 9, 51, 52, 53, 188, 189, 231, 232, 233]
+    rois = [363, 364, 365, 368, 372, 373, 374, 377, 379, 361, 370, 362, 371, 12, 54, 56, 78, 96, 192, 234, 236, 258, 276, 8, 9, 51, 52, 53, 188, 189, 231, 232, 233]
     rois = [roi - 1 for roi in rois]
     selected_rois_labels = [362, 363, 364, 367, 371, 372, 373, 376] 
     roi_mapping = functions.load_roi_labels(atlas_file_path)
@@ -29,6 +29,7 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(all_matrices, subjects, type = type)
+        
         
         if cluster == False:
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(all_matrices, rois, correction=correction, alpha=alpha, cluster=cluster)
@@ -52,6 +53,7 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(t1_matrices, subjects, type = type, rois=rois)
+        
         
         if cluster == True: # not sure if this is important to know ...
             t1_matrices_clustered = functions.cluster_and_plot(t1_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
