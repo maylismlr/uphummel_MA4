@@ -716,7 +716,7 @@ def test_normality(df, alpha=0.05):
     
     return shapiro_df
 
-def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_col='nmf_motor'):
+def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = False):
     """
     Perform Wilcoxon signed-rank test on the specified columns of the task scores.
     The Wilcoxon signed-rank test tests the null hypothesis that two related paired samples 
