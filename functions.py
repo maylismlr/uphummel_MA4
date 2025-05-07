@@ -164,22 +164,34 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
     
 def plot_mean_FC_matrices(matrices, rois):
     """
-    Plot the mean FC matrix for a given timepoint.
-    
+    Plot the mean FC matrix for each timepoint across all subjects.
     Args:
-        matrices (pd.DataFrame): DataFrame containing the matrices.
-        rois (list): List of ROIs.
-        timepoint (str): Timepoint to plot (e.g., 'T1', 'T2', 'T3', 'T4').
+        matrices (pd.DataFrame): DataFrame containing the FC matrices for each subject.
+        rois (list): List of ROI indices.
     """
-    
-    for timepoint in matrices.columns:
-        mean_matrix = np.mean(matrices[timepoint].dropna().values, axis=0)
+    matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
+
+    for timepoint in matrix_columns:
+        valid_matrices = matrices[timepoint].dropna()
+
+        if len(valid_matrices) == 0:
+            print(f"No data available for {timepoint}")
+            continue
+
+        # Stack matrices
+        stacked = np.stack([mat.values for mat in valid_matrices])
+
+        # Compute mean
+        mean_matrix = np.nanmean(stacked, axis=0)
+
+        # Plot
         plt.figure(figsize=(10, 8))
         sns.heatmap(mean_matrix, cmap='viridis', cbar=True, xticklabels=rois, yticklabels=rois)
         plt.title(f'Mean FC Matrix of all subjects - {timepoint}')
         plt.xlabel('ROIs')
         plt.ylabel('ROIs')
         plt.show()
+
     
 
 def flatten_upper(mat):
