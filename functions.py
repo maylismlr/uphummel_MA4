@@ -17,28 +17,33 @@ from sklearn.impute import SimpleImputer
 from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
 from scipy.stats import shapiro
+from scipy.stats import wilcoxon
 
 # for prettiness <3
 from tqdm import tqdm
 
-def load_data(folder_path, rois, type = 'all'):
+def load_excel_data(folder_path):
+    # Load Excel files
+    regression_info = pd.read_excel("data/TiMeS_regression_info_processed.xlsx", engine="openpyxl")
+    rsfMRI_full_info = pd.read_excel("data/TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
+    
+    # Keep only the first appearance of each subject_full_id
+    subject_info = regression_info.copy().drop_duplicates(subset=["subject_full_id"], keep="first")
+    
+    # Merge on subject_full_id
+    rsfMRI_full_info = rsfMRI_full_info.merge(subject_info, on="subject_full_id", how="left")
+    rsfMRI_full_info = rsfMRI_full_info[['subject_full_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','Gender','Age','Education_level','Combined', 'Bilateral']]
+    rsfMRI_full_info['subject_id'] = rsfMRI_full_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
+
+    return regression_info, rsfMRI_full_info
+
+def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all'):
     '''
     Load data from .mat files in the specified folder. Either get all matrices (enter type = 'all'), 
     or only T1 matrices (enter type = 't1_only'), or only T1 and T3 matrices matched (enter type = 't1_t3_matched),
     or only T1 and T4 matrices matched (enter type = 't1_t4_matched), or all T1 and T3 matrices (enter type = 't1_t3'),
     or or all T1 and T4 matrices (enter type = 't1_t4').
     '''
-    # Load Excel files
-    regression_info = pd.read_excel("data/TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("data/TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
-
-    # Keep only the first appearance of each subject_full_id
-    subject_info = regression_info.copy().drop_duplicates(subset=["subject_full_id"], keep="first")
-
-    # Merge on subject_full_id
-    rsfMRI_full_info = rsfMRI_full_info.merge(subject_info, on="subject_full_id", how="left")
-    rsfMRI_full_info = rsfMRI_full_info[['subject_full_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','Gender','Age','Education_level','Combined', 'Bilateral']]
-    rsfMRI_full_info['subject_id'] = rsfMRI_full_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
     
     # Extract last 4 characters of subject_id
     valid_subjects = rsfMRI_full_info["subject_id"].tolist()
@@ -97,37 +102,37 @@ def load_data(folder_path, rois, type = 'all'):
     if type == 't1_only':
         t1_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
 
-        return t1_matrices, regression_info, rsfMRI_full_info, subjects
+        return t1_matrices, subjects
     
     elif type == 't1_t3_matched':
         # keep only rows where both T1 and T3 matrices are not None
         t1_t3_matrices = df.copy().dropna(subset=['T1_matrix', 'T3_matrix'])
         t1_t3_matrices = t1_t3_matrices.drop(columns=['T2_matrix', 'T4_matrix'])
         
-        return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
+        return t1_t3_matrices, subjects
     
     elif type == 't1_t4_matched':
         # keep only rows where both T1 and T3 matrices are not None
         t1_t4_matrices = df.copy().dropna(subset=['T1_matrix', 'T4_matrix'])
         t1_t4_matrices = t1_t4_matrices.drop(columns=['T2_matrix', 'T3_matrix'])
         
-        return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
+        return t1_t4_matrices, subjects
     
     elif type == 't1_t3':
         # keep only rows where T1 or T3 matrices are not None
         t1_t3_matrices = df.copy().drop(columns=['T2_matrix', 'T4_matrix'])
         t1_t3_matrices = t1_t3_matrices[~(t1_t3_matrices['T1_matrix'].isna() & t1_t3_matrices['T3_matrix'].isna())]
         
-        return t1_t3_matrices, regression_info, rsfMRI_full_info, subjects
+        return t1_t3_matrices, subjects
     
     elif type == 't1_t4':
         # keep only rows where T1 or T4 matrices are not None
         t1_t4_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix'])
         t1_t4_matrices = t1_t4_matrices[~(t1_t4_matrices['T1_matrix'].isna() & t1_t4_matrices['T4_matrix'].isna())]
 
-        return t1_t4_matrices, regression_info, rsfMRI_full_info, subjects
+        return t1_t4_matrices, subjects
     
-    return df, regression_info, rsfMRI_full_info, subjects
+    return df, subjects
 
 # plot the heatmap of the matrices
 def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
@@ -162,38 +167,41 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
     plt.tight_layout()
     plt.show();
     
+
 def plot_mean_FC_matrices(matrices, rois):
     """
-    Plot the mean FC matrix for each timepoint across all subjects.
+    Plot the mean FC matrices in a 2x2 grid for T1 to T4 timepoints.
+
     Args:
-        matrices (pd.DataFrame): DataFrame containing the FC matrices for each subject.
+        matrices (pd.DataFrame): DataFrame with subject FC matrices.
         rois (list): List of ROI indices.
     """
     matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
 
-    for timepoint in matrix_columns:
+    for i, timepoint in enumerate(matrix_columns):
         valid_matrices = matrices[timepoint].dropna()
 
         if len(valid_matrices) == 0:
-            print(f"No data available for {timepoint}")
+            axes[i].axis('off')
+            axes[i].set_title(f'No data for {timepoint}')
             continue
 
-        # Stack matrices
+        # Stack and average
         stacked = np.stack([mat.values for mat in valid_matrices])
-
-        # Compute mean
         mean_matrix = np.nanmean(stacked, axis=0)
 
-        # Plot
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(mean_matrix, cmap='viridis', cbar=True, xticklabels=rois, yticklabels=rois)
-        plt.title(f'Mean FC Matrix of all subjects - {timepoint}')
-        plt.xlabel('ROIs')
-        plt.ylabel('ROIs')
-        plt.show()
+        sns.heatmap(mean_matrix, ax=axes[i], cmap='viridis', cbar=True,
+                    xticklabels=rois, yticklabels=rois)
+        axes[i].set_title(f'Mean FC Matrix - {timepoint}')
+        axes[i].set_xlabel('ROIs')
+        axes[i].set_ylabel('ROIs')
+
+    plt.tight_layout()
+    plt.show()
 
     
-
 def flatten_upper(mat):
         mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
         return mat[np.triu_indices_from(mat, k=1)]
@@ -595,7 +603,7 @@ def compute_FC_diff(df, rois, tp=3):
     
     # Plotting
     plt.figure(figsize=(10, 6))
-    sns.heatmap(diff_array.mean(axis=0), cmap='viridis', cbar=True, annot=False, square=True, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
+    sns.heatmap(diff_array.mean(axis=0), cmap='viridis', cbar=True, annot=False, square=True, vmin=-2, vmax=1, xticklabels=rois, yticklabels=rois)
     plt.title(f"Mean FC Difference (T{tp} - T1)")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
@@ -619,12 +627,12 @@ def load_roi_labels(filepath_csv):
     roi_df = pd.read_csv(filepath_csv)
 
     # Check if necessary columns are present
-    expected_columns = {'#ID', 'RegionLongName'}
+    expected_columns = {'# ID', 'RegionLongName'}
     if not expected_columns.issubset(roi_df.columns):
         raise ValueError(f"The CSV file must contain the columns {expected_columns}. Found columns: {roi_df.columns.tolist()}")
 
     # Build mapping: Python index (0-based) -> RegionLongName
-    roi_mapping = {row['#ID'] - 1: row['RegionLongName'] for _, row in roi_df.iterrows()}
+    roi_mapping = {row['# ID'] - 1: row['RegionLongName'] for _, row in roi_df.iterrows()}
 
     return roi_mapping
 
@@ -678,7 +686,7 @@ def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_m
 
     return summary_df
 
-def test_nomality(df, alpha=0.05):
+def test_normality(df, alpha=0.05):
     """
     Perform Shapiro-Wilk test for normality on the data.
     
@@ -689,7 +697,7 @@ def test_nomality(df, alpha=0.05):
     Returns:
         bool: True if data is normally distributed, False otherwise.
     """
-    df = df.copy().drop(columns=['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix', "subject_full_id",	"TimePoint", "Behavioral_assessment", "MRI", "Gender", "Age", "Education_level", "Lesion_side_old",	"Lesion_side", "Combined", "Bilateral", "Comments", "Stroke_location"])
+    df = df.copy().drop(columns=["subject_full_id",	"TimePoint", "Behavioral_assessment", "MRI", "Gender", "Age", "Education_level", "Lesion_side_old",	"Lesion_side", "Combined", "Bilateral", "Comments", "Stroke_location"])
                         #drop (columns=['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','
     results = {}
     for col in df.select_dtypes(include=['float64', 'int64']).columns:
@@ -707,3 +715,45 @@ def test_nomality(df, alpha=0.05):
     print(shapiro_df)
     
     return shapiro_df
+
+def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_col='nmf_motor'):
+    """
+    Perform Wilcoxon signed-rank test on the specified columns of the task scores.
+    The Wilcoxon signed-rank test tests the null hypothesis that two related paired samples 
+    come from the same distribution. 
+    """
+    
+    cols_to_keep = ['subject_full_id','TimePoint'] + regression_info.loc[:, start_col:end_col].columns.tolist()
+
+    regression_info_part = regression_info[cols_to_keep]
+
+    score_T1 = regression_info_part[regression_info_part.TimePoint == "T1"].copy().dropna()
+    score_T = regression_info_part[regression_info_part.TimePoint == f"T{tp}"].copy().dropna()
+
+    # Match score_T1 and score_T3 based on 'subject_full_id'
+    common_ids = set(score_T1['subject_full_id']).intersection(score_T['subject_full_id'])
+    score_T1_matched = score_T1[score_T1['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint'])
+    score_T_matched = score_T[score_T['subject_full_id'].isin(common_ids)].set_index('subject_full_id').drop(columns=['TimePoint'])
+
+    # Run Wilcoxon test across columns (axis=0)
+    stat, p = wilcoxon(score_T1_matched, score_T_matched, axis=0)
+
+    results = []
+    for col in score_T1_matched.columns:
+        try:
+            stat, pval = wilcoxon(score_T1_matched[col], score_T_matched[col])
+            results.append({
+                'Task': col, 
+                'n': len(score_T1_matched), 
+                'p-value': pval, 
+                'Statistically sig. change between TP': 'Yes' if pval < 0.05 else 'No'
+            })
+        except ValueError:
+            results.append({
+                'Task': col, 
+                'n': len(score_T1_matched), 
+                'p-value': None, 
+                'Statistically sig. change between TP': 'No'
+            })
+
+    return pd.DataFrame(results)

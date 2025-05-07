@@ -20,15 +20,22 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
     # categorical and numerical columns
     categorical_cols = ['Lesion_side', 'Stroke_location','Combined', 'Bilateral']
     numerical_cols = ['lesion_volume_mm3','Gender','Age','Education_level']
-
+    
+    regression_info, rsfMRI_full_info = functions.load_excel_data(folder_path)
 
     if type == 'all':
         # Load the data
-        all_matrices, regression_info, rsfMRI_full_info, subjects = functions.load_data(folder_path, rois, type)
+        all_matrices, subjects = functions.load_matrices(folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(all_matrices, subjects, type = type)
+        
+        # perform longitudinal analysis on tasks
+        results_t3 = functions.motor_longitudinal(regression_info, tp = 3)
+        print(results_t3)
+        results_t4 = functions.motor_longitudinal(regression_info, tp = 4)
+        print(results_t4)
         
         
         if cluster == False:
@@ -48,7 +55,7 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
 
     
     elif type == 't1_only':
-        t1_matrices, regression_info, rsfMRI_full_info, subjects = functions.load_data(folder_path, rois, type)
+        t1_matrices, subjects = functions.load_matrices(folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -68,11 +75,15 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
                
 
     elif type == 't1_t3':
-        t1_t3_matrices, regression_info, rsfMRI_full_info, subjects = functions.load_data(folder_path, rois, type='t1_t3')
+        t1_t3_matrices, subjects = functions.load_matrices(folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(t1_t3_matrices, subjects, rois=rois, type = type)
+        
+        # perform longitudinal analysis on tasks
+        results_t3 = functions.motor_longitudinal(regression_info, tp = 3)
+        print(results_t3)
         
         if cluster == False:
             # plot the significant differences between the matrices
@@ -96,11 +107,15 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
 
 
     elif type == 't1_t4':
-        t1_t4_matrices, regression_info, rsfMRI_full_info, subjects = functions.load_data(folder_path, rois, type='t1_t4')
+        t1_t4_matrices, subjects = functions.load_matrices(folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(t1_t4_matrices, subjects, rois=rois, type = type)
+        
+        # perform longitudinal analysis on tasks
+        results_t4 = functions.motor_longitudinal(regression_info, tp = 4)
+        print(results_t4)
         
         if cluster == False:
             # plot the significant differences between the matrices
@@ -124,11 +139,15 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
       
         
     elif type == 't1_t3_matched':
-        t1_t3_matched, regression_info, rsfMRI_full_info, subjects = functions.load_data(folder_path, rois, type='t1_t3_matched')
+        t1_t3_matched, subjects = functions.load_matrices(folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(t1_t3_matched, subjects, rois=rois, type = type)
+        
+        # perform longitudinal analysis on tasks
+        results_t3 = functions.motor_longitudinal(regression_info, tp = 3)
+        print(results_t3)
         
         if cluster == False:
             # plot the significant differences between the matrices
@@ -175,11 +194,15 @@ def main(type = 'all', cluster = False, num_clusters = 2, correction = False, al
 
     
     elif type == 't1_t4_matched':
-        t1_t4_matched, regression_info, rsfMRI_full_info, subjects = functions.load_data(folder_path, rois, type='t1_t4_matched')
+        t1_t4_matched, subjects = functions.load_matrices(folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
         functions.plot_all_subject_matrices(t1_t4_matched, subjects, rois=rois, type = type)
+        
+        # perform longitudinal analysis on tasks
+        results_t4 = functions.motor_longitudinal(regression_info, tp = 4)
+        print(results_t4)
         
         if cluster == False:
             # plot the significant differences between the matrices
