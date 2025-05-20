@@ -24,8 +24,8 @@ from tqdm import tqdm
 
 def load_excel_data(folder_path):
     # Load Excel files
-    regression_info = pd.read_excel("data/TiMeS_regression_info_processed.xlsx", engine="openpyxl")
-    rsfMRI_full_info = pd.read_excel("data/TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
+    regression_info = pd.read_excel(f"{folder_path}TiMeS_regression_info_processed.xlsx", engine="openpyxl")
+    rsfMRI_full_info = pd.read_excel(f"{folder_path}TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
     
     # Keep only the first appearance of each subject_full_id
     subject_info = regression_info.copy().drop_duplicates(subset=["subject_full_id"], keep="first")
@@ -37,7 +37,7 @@ def load_excel_data(folder_path):
 
     return regression_info, rsfMRI_full_info
 
-def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all'):
+def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = False, subset = False):
     '''
     Load data from .mat files in the specified folder. Either get all matrices (enter type = 'all'), 
     or only T1 matrices (enter type = 't1_only'), or only T1 and T3 matrices matched (enter type = 't1_t3_matched),
@@ -69,8 +69,9 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all'):
             mat_data = scipy.io.loadmat(mat_file_path)
             if 'CM' not in mat_data:
                 continue
-
+            
             matrix = pd.DataFrame(mat_data['CM']).iloc[rois, rois]
+            
             matrix = matrix.replace('None', np.nan)
 
             if 'T1' in mat_file:
@@ -93,9 +94,14 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all'):
     # Create dataframe
     df = pd.DataFrame(data_rows)
     
-    # plot mean FC matrices
-    plot_mean_FC_matrices(df, rois)
+    yeo_path = "data/hcp_mmp10_yeo7_modes_indices.csv"
+    region_to_yeo = glasser_mapped_to_yeo(yeo_path)
     
+    if plot:
+        # plot mean FC matrices
+        plot_mean_FC_matrices(df, rois, subset)
+        plot_mean_yeo_matrices(df, region_to_yeo, rois, subset)
+        
     # Merge the DataFrame with rsfMRI_info on subject_id
     df = df.merge(rsfMRI_full_info, on="subject_id", how="left")
     
@@ -168,7 +174,7 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
     plt.show();
     
 
-def plot_mean_FC_matrices(matrices, rois):
+def plot_mean_FC_matrices(matrices, rois, subset=False):
     """
     Plot the mean FC matrices in a 2x2 grid for T1 to T4 timepoints.
 
@@ -191,9 +197,18 @@ def plot_mean_FC_matrices(matrices, rois):
         # Stack and average
         stacked = np.stack([mat.values for mat in valid_matrices])
         mean_matrix = np.nanmean(stacked, axis=0)
+        
 
-        sns.heatmap(mean_matrix, ax=axes[i], cmap='viridis', cbar=True,
-                    xticklabels=rois, yticklabels=rois)
+        tick_positions = np.arange(len(rois))
+        tick_labels = [str(roi) for roi in rois]
+        
+        if subset == False:
+            tick_positions = [0, len(rois) // 2, len(rois) - 1]
+            tick_labels = [str(pos) for pos in tick_positions]
+
+        sns.heatmap(mean_matrix, ax=axes[i], cmap='viridis', cbar=True)
+        plt.xticks(ticks=tick_positions, labels=tick_labels)
+        plt.yticks(ticks=tick_positions, labels=tick_labels)
         axes[i].set_title(f'Mean FC Matrix - {timepoint}')
         axes[i].set_xlabel('ROIs')
         axes[i].set_ylabel('ROIs')
@@ -550,44 +565,6 @@ def get_sig_matrix(df, rois, tp=3, correction=True, alpha=0.05, cluster=False):
 
         return results
 
-
-'''def sig_matrix_T1_T(df, tp=3, alpha=0.05, clusters=False):
-    results = {}
-    if cluster == False:
-        return get_sig_matrix(df, tp, alpha)
-    
-    elif clusters == True:
-        for cluster in sorted(df['cluster'].unique()):
-            print(f"\nAnalyzing Cluster {cluster}...")
-
-            # Subset to current cluster
-            cluster_df = df[df['cluster'] == cluster]
-
-            # Ensure subjects have both T1 and T4
-            cluster_df = cluster_df.dropna(subset=['T1_matrix', f'T{tp}_matrix'])
-
-            if cluster_df.empty:
-                print(f" - No data for Cluster {cluster}")
-                continue
-
-            significant_matrix, p_vals_corrected, reject = get_sig_matrix(cluster_df, tp, alpha)
-
-            # Store results
-            results[cluster] = {
-                'signif_matrix': significant_matrix,
-                'p_corrected': p_vals_corrected,
-                'rejected': reject,
-            }
-
-            plt.figure(figsize=(8, 4))
-            sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=True, square=True, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
-            plt.title("Significance Heatmap (FDR-corrected)")
-            plt.xlabel("ROIs")
-            plt.ylabel("ROIs")
-            plt.tight_layout()
-            plt.show();
-
-        return results'''
     
 def compute_FC_diff(df, rois, tp=3):
     # Extract T1 and T4 matrices
@@ -718,7 +695,8 @@ def test_normality(df, alpha=0.05):
 
 def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = False):
     """
-    Perform Wilcoxon signed-rank test on the specified columns of the task scores.
+    Perform Wilcoxon signed-rank test on the specified columns of the task scores, to see if improvements 
+    of task scores across timepoints.
     The Wilcoxon signed-rank test tests the null hypothesis that two related paired samples 
     come from the same distribution. 
     """
@@ -733,10 +711,10 @@ def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_
         lesion_unknown = regression_info_part[~regression_info_part['Lesion_side'].isin(['L', 'R', 'R/L'])]
 
         score_T1_L = lesion_left[lesion_left.TimePoint == "T1"].copy().dropna()
-        score_T_L = lesion_left[lesion_left.TimePoint == f"T3"].copy().dropna()
+        score_T_L = lesion_left[lesion_left.TimePoint == f"T{tp}"].copy().dropna()
 
         score_T1_R = lesion_right[lesion_right.TimePoint == "T1"].copy().dropna()
-        score_T_R = lesion_right[lesion_right.TimePoint == f"T3"].copy().dropna()
+        score_T_R = lesion_right[lesion_right.TimePoint == f"T{tp}"].copy().dropna()
 
         # Match score_T1 and score_T3 based on 'subject_full_id'
         common_ids = set(score_T1_L['subject_full_id']).intersection(score_T_L['subject_full_id'])
@@ -825,3 +803,173 @@ def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_
                 })
 
         return pd.DataFrame(results)
+    
+
+def glasser_mapped_to_yeo(yeo_path):
+    # --- Load and prepare Yeo mapping ---
+    yeo = pd.read_csv(yeo_path, names=['Yeo_Network'])
+    yeo['Glasser_Index'] = range(1, 361)
+    new_rows = pd.DataFrame({
+        'Glasser_Index': range(361, 380),
+        'Yeo_Network': 8
+    })
+    region_to_yeo = pd.concat([yeo, new_rows], ignore_index=True)
+    region_to_yeo['Yeo_Network'] = region_to_yeo['Yeo_Network'] - 1
+    region_to_yeo['Glasser_Index'] = region_to_yeo['Glasser_Index'] - 1
+
+    # Optional: Yeo network names
+    yeo_label_map = {
+        0: "Visual", 1: "Somatomotor", 2: "Dorsal Attention", 3: "Ventral Attention",
+        4: "Limbic", 5: "Frontoparietal", 6: "Default", 7: "Subcortical"
+    }
+    region_to_yeo['yeo_name'] = region_to_yeo['Yeo_Network'].map(yeo_label_map)
+
+    return region_to_yeo
+
+def get_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
+    
+    matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+
+    for idx, timepoint in enumerate(matrix_columns):
+        valid_matrices = matrices[timepoint].dropna()
+
+        if len(valid_matrices) == 0:
+            axes[idx].axis('off')
+            axes[idx].set_title(f'No data for {timepoint}')
+            continue
+
+        # Compute FC matrices at the Yeo network level for all subjects
+        yeo_matrices = []
+
+        for mat in valid_matrices:
+            fc_matrix = mat.to_numpy()
+
+            # Optional: subset the matrix
+            if subset == True:
+                #fc_matrix = fc_matrix[rois, :][:, rois]
+                subset_map = region_to_yeo[region_to_yeo['Glasser_Index'].isin(rois)].copy()
+            else:
+                subset_map = region_to_yeo.copy()
+
+            # Remap Glasser indices to FC matrix local indices
+            index_map = {roi: i for i, roi in enumerate(rois)}
+            subset_map = subset_map[subset_map['Glasser_Index'].isin(index_map)]
+
+            # Group by Yeo network
+            network_to_indices = subset_map.groupby('Yeo_Network')['Glasser_Index'].apply(list).to_dict()
+            key_list = sorted(network_to_indices.keys())
+            key_to_idx = {k: i for i, k in enumerate(key_list)}
+            num_networks = len(key_list)
+
+            yeo_fc = np.zeros((num_networks, num_networks))
+
+            for i in key_list:
+                for j in key_list:
+                    idx_i = [index_map[g] for g in network_to_indices[i]]
+                    idx_j = [index_map[g] for g in network_to_indices[j]]
+                    submatrix = fc_matrix[np.ix_(idx_i, idx_j)]
+                    yeo_fc[key_to_idx[i], key_to_idx[j]] = submatrix.mean()
+
+            yeo_matrices.append(yeo_fc)
+
+        # Average across subjects
+        stacked = np.stack(yeo_matrices)
+        mean_yeo = np.nanmean(stacked, axis=0)
+
+        # Label axes
+        # Use the 'yeo_name' column from region_to_yeo for labels
+        yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
+        labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
+        
+        return mean_yeo, labels
+
+def plot_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
+    """
+    Plot the mean Yeo FC matrices in a 2x2 grid for T1 to T4 timepoints.
+
+    Args:
+        matrices (pd.DataFrame): DataFrame with subject FC matrices (T1_matrix to T4_matrix).
+        region_to_yeo (pd.DataFrame): Mapping of Glasser_Index to Yeo_Network.
+        rois (list or None): Optional list of ROI indices to restrict analysis to.
+        label_map (dict or None): Optional Yeo_Network label-to-name mapping.
+    """
+
+    matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+
+    for idx, timepoint in enumerate(matrix_columns):
+        valid_matrices = matrices[timepoint].dropna()
+
+        if len(valid_matrices) == 0:
+            axes[idx].axis('off')
+            axes[idx].set_title(f'No data for {timepoint}')
+            continue
+
+        # Compute FC matrices at the Yeo network level for all subjects
+        yeo_matrices = []
+
+        for mat in valid_matrices:
+            fc_matrix = mat.to_numpy()
+
+            # Optional: subset the matrix
+            if subset == True:
+                #fc_matrix = fc_matrix[rois, :][:, rois]
+                subset_map = region_to_yeo[region_to_yeo['Glasser_Index'].isin(rois)].copy()
+            else:
+                subset_map = region_to_yeo.copy()
+
+            # Remap Glasser indices to FC matrix local indices
+            index_map = {roi: i for i, roi in enumerate(rois)}
+            subset_map = subset_map[subset_map['Glasser_Index'].isin(index_map)]
+
+            # Group by Yeo network
+            network_to_indices = subset_map.groupby('Yeo_Network')['Glasser_Index'].apply(list).to_dict()
+            key_list = sorted(network_to_indices.keys())
+            key_to_idx = {k: i for i, k in enumerate(key_list)}
+            num_networks = len(key_list)
+
+            yeo_fc = np.zeros((num_networks, num_networks))
+
+            for i in key_list:
+                for j in key_list:
+                    idx_i = [index_map[g] for g in network_to_indices[i]]
+                    idx_j = [index_map[g] for g in network_to_indices[j]]
+                    submatrix = fc_matrix[np.ix_(idx_i, idx_j)]
+                    yeo_fc[key_to_idx[i], key_to_idx[j]] = submatrix.mean()
+
+            yeo_matrices.append(yeo_fc)
+
+        # Average across subjects
+        stacked = np.stack(yeo_matrices)
+        mean_yeo = np.nanmean(stacked, axis=0)
+
+        # Label axes
+        # Use the 'yeo_name' column from region_to_yeo for labels
+        yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
+        labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
+
+        sns.heatmap(mean_yeo, ax=axes[idx], cmap='coolwarm', annot=True, fmt=".2f",
+                    xticklabels=labels, yticklabels=labels)
+        axes[idx].set_title(f"Mean Yeo FC - {timepoint}")
+        axes[idx].set_xlabel("Yeo Network")
+        axes[idx].set_ylabel("Yeo Network")
+        axes[idx].tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    plt.show()
+
+def get_yeo_labels(yeo_path):
+    yeo = pd.read_csv(yeo_path, names=['Yeo_Network'])
+    yeo['Glasser_Index'] = range(1, 361)
+    new_rows = pd.DataFrame({
+        'Glasser_Index': range(361, 380),
+        'Yeo_Network': 8
+    })
+    region_to_yeo = pd.concat([yeo, new_rows], ignore_index=True)
+    region_to_yeo['Yeo_Network'] = region_to_yeo['Yeo_Network'] - 1
+    region_to_yeo['Glasser_Index'] = region_to_yeo['Glasser_Index'] - 1
+    
+    return region_to_yeo
