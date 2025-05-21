@@ -100,13 +100,13 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
     subset = False   
     yeo_path = "data/hcp_mmp10_yeo7_modes_indices.csv"
     region_to_yeo = glasser_mapped_to_yeo(yeo_path)
-    yeo_mat_all_rois, labels = get_all_yeo_matrices(df, region_to_yeo, rois_full, type, subset)
-    print(labels)
+    yeo_mat_all_rois, yeo_labels = get_all_yeo_matrices(df, region_to_yeo, rois_full, type, subset)
+    roi_mapping_yeo = {i: label for i, label in enumerate(yeo_labels)}
     
     if plot:
         # plot mean FC matrices
         plot_mean_FC_matrices(df, rois_full, subset)
-        plot_mean_yeo_matrices(yeo_mat_all_rois, labels)
+        plot_mean_yeo_matrices(yeo_mat_all_rois, yeo_labels)
     
     subset = True   
     # Merge the DataFrame with rsfMRI_info on subject_id
@@ -116,19 +116,19 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
     df_rois = df.copy()
     for col in ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']:
         df_rois[col] = df[col].apply(lambda mat: mat.iloc[rois, rois] if mat is not None else None)
-    yeo_mat_rois, labels = get_all_yeo_matrices(df_rois, region_to_yeo, rois, type, subset)
+    yeo_mat_rois, yeo_labels = get_all_yeo_matrices(df_rois, region_to_yeo, rois, type, subset)
     
     if plot:
         # plot mean FC matrices
         plot_mean_FC_matrices(df_rois, rois, subset)
-        plot_mean_yeo_matrices(yeo_mat_rois, labels)
+        plot_mean_yeo_matrices(yeo_mat_rois, yeo_labels)
     
     if type == 't1_only':            
         t1_matrices = df_rois.copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
         #yeo_rois_t1 = pd.DataFrame(yeo_mat_all_rois).copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
         yeo_rois_t1 = yeo_mat_all_rois['T1_matrix']
 
-        return t1_matrices, subjects, yeo_rois_t1
+        return t1_matrices, subjects, yeo_rois_t1, roi_mapping_yeo
     
     elif type == 't1_t3_matched':
         # keep only rows where both T1 and T3 matrices are not None
@@ -136,7 +136,7 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
         t1_t3_matrices = t1_t3_matrices.drop(columns=['T2_matrix', 'T4_matrix'])
         yeo_rois_t1_t3 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T4_matrix'])
         
-        return t1_t3_matrices, subjects, yeo_rois_t1_t3
+        return t1_t3_matrices, subjects, yeo_rois_t1_t3, roi_mapping_yeo
     
     elif type == 't1_t4_matched':
         # keep only rows where both T1 and T3 matrices are not None
@@ -144,7 +144,7 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
         t1_t4_matrices = t1_t4_matrices.drop(columns=['T2_matrix', 'T3_matrix'])
         yeo_rois_t1_t4 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T3_matrix'])
         
-        return t1_t4_matrices, subjects, yeo_rois_t1_t4
+        return t1_t4_matrices, subjects, yeo_rois_t1_t4, roi_mapping_yeo
     
     elif type == 't1_t3':
         # keep only rows where T1 or T3 matrices are not None
@@ -152,7 +152,7 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
         t1_t3_matrices = t1_t3_matrices[~(t1_t3_matrices['T1_matrix'].isna() & t1_t3_matrices['T3_matrix'].isna())]
         yeo_rois_t1_t3 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T4_matrix'])
         
-        return t1_t3_matrices, subjects, yeo_rois_t1_t3
+        return t1_t3_matrices, subjects, yeo_rois_t1_t3, roi_mapping_yeo
     
     elif type == 't1_t4':
         # keep only rows where T1 or T4 matrices are not None
@@ -160,9 +160,9 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
         t1_t4_matrices = t1_t4_matrices[~(t1_t4_matrices['T1_matrix'].isna() & t1_t4_matrices['T4_matrix'].isna())]
         yeo_rois_t1_t4 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T3_matrix'])
 
-        return t1_t4_matrices, subjects, yeo_rois_t1_t4
+        return t1_t4_matrices, subjects, yeo_rois_t1_t4, roi_mapping_yeo
     
-    return df, subjects, yeo_mat_all_rois
+    return df, subjects, yeo_mat_all_rois, roi_mapping_yeo
 
 # plot the heatmap of the matrices
 def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
@@ -263,7 +263,7 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     # Preprocess categorical columns
     matrices[categorical_cols_name] = matrices[categorical_cols_name].fillna('Unknown')  # Handle missing values
     matrices_encoded = pd.get_dummies(matrices[categorical_cols_name], drop_first=True)
-    print(matrices_encoded.columns)
+    #print(matrices_encoded.columns)
     
     # Extract numerical column
     numerical_cols = matrices[numerical_cols_names].fillna(0).values # not sure if this is the right way to handle missing values
@@ -492,7 +492,6 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=""):
     '''
     Analyzes the matrices and computes the significance matrix for the function underneath.
     '''
-    print(t_matrices)
     # Initialize arrays to store t-stats and p-values
     first_valid = next(mat for mat in t1_matrices if mat is not None)
     rois = np.arange(first_valid.shape[0])
@@ -666,11 +665,13 @@ def load_roi_labels(filepath_csv):
 def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_mapping, cluster_label=None, alpha=0.05):
     """
     Summarize significant differences into a readable DataFrame.
+    
 
     Args:
         p_values_matrix (np.array): Matrix of p-values
         effect_size_matrix (np.array): Matrix of effect sizes
         roi_mapping (dict): Mapping ROI index -> region name
+        when using yeo, use this: roi_mapping_yeo = {i: label for i, label in enumerate(yeo_labels)}
         cluster_label (int or None): Cluster index. If None, no cluster column is added.
         alpha (float): Significance threshold after correction (default 0.05)
 

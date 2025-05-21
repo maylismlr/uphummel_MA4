@@ -25,7 +25,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
 
     if type == 'all':
         # Load the data
-        all_matrices, subjects, yeo_all_rois = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        all_matrices, subjects, yeo_all_rois, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -45,7 +45,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             print(task_results_t4)
         
         if cluster == False:
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(all_matrices, correction=correction, alpha=alpha, cluster=cluster)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(all_matrices, correction=correction, alpha=alpha, cluster=cluster) #for tp = 3
             
             summary = functions.summarize_significant_differences(
                 p_vals_corrected,
@@ -66,7 +66,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 categorical_cols=categorical_cols
             )
             importance_df = functions.compute_feature_importance(all_features, clusters, feature_names)
-            results = functions.get_sig_matrix(all_matrices_clustered_v2, correction=correction, alpha=alpha, cluster=cluster)    
+            results = functions.get_sig_matrix(all_matrices_clustered_v2, correction=correction, alpha=alpha, cluster=cluster) #for tp = 3
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
@@ -84,7 +84,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
 
     
     elif type == 't1_only':
-        t1_matrices, subjects, yeo_rois_t1 = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        t1_matrices, subjects, yeo_rois_t1, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -118,7 +118,8 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                
 
     elif type == 't1_t3':
-        t1_t3_matrices, subjects, yeo_rois_t1_t3 = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        print("doing load matrices")
+        t1_t3_matrices, subjects, yeo_rois_t1_t3, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -145,7 +146,19 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 alpha=alpha
             )
             
-            print(f"Top significant connections for type {type}:")
+            print(f"Top significant connections (Glasser atlas) for type {type}:")
+            print(summary.head(10))
+            
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False)
+
+            summary = functions.summarize_significant_differences(
+                            p_vals_corrected,
+                            significant_matrix,
+                            roi_mapping_yeo,
+                            alpha=0.05
+                        )
+            
+            print(f"Top significant connections (Yeo atlas) for type {type}:")
             print(summary.head(10))
         
         if cluster == True:
@@ -174,12 +187,12 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                     cluster_label=clust
                 )
 
-                print(f"Top significant connections for cluster {clust}:")
+                print(f"Top significant connections (Glasser atlas) for cluster {clust}:")
                 print(summary.head(10))
 
 
     elif type == 't1_t4':
-        t1_t4_matrices, subjects, yeo_rois_t1_t4 = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        t1_t4_matrices, subjects, yeo_rois_t1_t4, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -197,7 +210,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
         if cluster == False:
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matrices, correction=correction, alpha=alpha, cluster=cluster)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matrices, tp=4, correction=correction, alpha=alpha, cluster=cluster)
             
             summary = functions.summarize_significant_differences(
                 p_vals_corrected,
@@ -208,9 +221,21 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             print(f"Top significant connections for type {type}:")
             print(summary.head(10))
+            
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False)
+
+            summary = functions.summarize_significant_differences(
+                            p_vals_corrected,
+                            significant_matrix,
+                            roi_mapping_yeo,
+                            alpha=0.05
+                        )
+            
+            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(summary.head(10))
         
         elif cluster == True:
-            t1_t4_matrices_clustered = functions.cluster_and_plot(t1_t3_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
+            t1_t4_matrices_clustered = functions.cluster_and_plot(t1_t4_matrices, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
             t1_t4_matrices_clustered_v2, clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names = functions.cluster_subjects(
                 t1_t4_matrices, 
                 selected_rois_labels, 
@@ -222,7 +247,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            results = functions.get_sig_matrix(t1_t4_matrices_clustered_v2, correction=correction, alpha=alpha, cluster=cluster)
+            results = functions.get_sig_matrix(t1_t4_matrices_clustered_v2, tp=4, correction=correction, alpha=alpha, cluster=cluster)
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
@@ -240,7 +265,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
       
         
     elif type == 't1_t3_matched':
-        t1_t3_matched, subjects, yeo_rois_t1_t3 = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        t1_t3_matched, subjects, yeo_rois_t1_t3, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -269,6 +294,18 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             print(f"Top significant connections for type {type}:")
             print(summary.head(10)) 
+            
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False)
+
+            summary = functions.summarize_significant_differences(
+                            p_vals_corrected,
+                            significant_matrix,
+                            roi_mapping_yeo,
+                            alpha=0.05
+                        )
+            
+            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(summary.head(10))
         
         elif cluster == True:
             t1_t3_matched_clustered = functions.cluster_and_plot(t1_t3_matched, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
@@ -302,7 +339,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
 
     
     elif type == 't1_t4_matched':
-        t1_t4_matched, subjects = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        t1_t4_matched, subjects, yeo_rois_t1_t4, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
@@ -320,7 +357,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
         if cluster == False:
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matched, correction=correction, alpha=alpha, cluster=cluster)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matched, tp=4, correction=correction, alpha=alpha, cluster=cluster)
             
             summary = functions.summarize_significant_differences(
                 p_vals_corrected,
@@ -331,9 +368,21 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             print(f"Top significant connections for type {type}:")
             print(summary.head(10))
+            
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False)
+
+            summary = functions.summarize_significant_differences(
+                            p_vals_corrected,
+                            significant_matrix,
+                            roi_mapping_yeo,
+                            alpha=0.05
+                        )
+            
+            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(summary.head(10))
         
         elif cluster == True:
-            t1_t4_matched_clustered = functions.cluster_and_plot(t1_t3_matched, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
+            t1_t4_matched_clustered = functions.cluster_and_plot(t1_t4_matched, numerical_cols_names= numerical_cols, categorical_cols_name=categorical_cols, clusters=num_clusters)
             t1_t4_matched_clustered_v2, clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names = functions.cluster_subjects(
                 t1_t4_matched, 
                 selected_rois_labels, 
@@ -345,7 +394,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            results = functions.get_sig_matrix(t1_t4_matched_clustered_v2, correction=correction, alpha=alpha, cluster=cluster)
+            results = functions.get_sig_matrix(t1_t4_matched_clustered_v2, tp=4, correction=correction, alpha=alpha, cluster=cluster)
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
@@ -373,4 +422,4 @@ if __name__ == "__main__":
     # Run the main function
     rois = [363, 364, 365, 368, 372, 373, 374, 377, 379, 361, 370, 362, 371, 12, 54, 56, 78, 96, 192, 234, 236, 258, 276, 8, 9, 51, 52, 53, 188, 189, 231, 232, 233]
     rois = [roi - 1 for roi in rois]
-    main(rois, type='t1_t3', cluster=True, num_clusters=2, split_L_R=True)
+    main(rois, type='t1_t3', cluster=False, num_clusters=2, split_L_R=True)
