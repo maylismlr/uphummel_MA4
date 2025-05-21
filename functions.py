@@ -37,12 +37,13 @@ def load_excel_data(folder_path):
 
     return regression_info, rsfMRI_full_info
 
-def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = False, subset = False):
+def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = False):
     '''
     Load data from .mat files in the specified folder. Either get all matrices (enter type = 'all'), 
     or only T1 matrices (enter type = 't1_only'), or only T1 and T3 matrices matched (enter type = 't1_t3_matched),
     or only T1 and T4 matrices matched (enter type = 't1_t4_matched), or all T1 and T3 matrices (enter type = 't1_t3'),
     or or all T1 and T4 matrices (enter type = 't1_t4').
+    Returns also yeo matrices for the selected ROIs.
     '''
     
     # Extract last 4 characters of subject_id
@@ -52,6 +53,8 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
     subjects = [sub for sub in os.listdir(folder_path) if sub in valid_subjects and not sub.startswith('.')]
 
     data_rows = []
+    
+    rois_full = np.arange(0, 379)
 
     for sub in subjects:
         sub_folder = os.path.join(folder_path, sub)
@@ -70,7 +73,7 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
             if 'CM' not in mat_data:
                 continue
             
-            matrix = pd.DataFrame(mat_data['CM']).iloc[rois, rois]
+            matrix = pd.DataFrame(mat_data['CM']).iloc[rois_full, rois_full]
             
             matrix = matrix.replace('None', np.nan)
 
@@ -94,51 +97,72 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
     # Create dataframe
     df = pd.DataFrame(data_rows)
     
+    subset = False   
     yeo_path = "data/hcp_mmp10_yeo7_modes_indices.csv"
     region_to_yeo = glasser_mapped_to_yeo(yeo_path)
+    yeo_mat_all_rois, labels = get_all_yeo_matrices(df, region_to_yeo, rois_full, type, subset)
+    print(labels)
     
     if plot:
         # plot mean FC matrices
-        plot_mean_FC_matrices(df, rois, subset)
-        plot_mean_yeo_matrices(df, region_to_yeo, rois, subset)
-        
+        plot_mean_FC_matrices(df, rois_full, subset)
+        plot_mean_yeo_matrices(yeo_mat_all_rois, labels)
+    
+    subset = True   
     # Merge the DataFrame with rsfMRI_info on subject_id
     df = df.merge(rsfMRI_full_info, on="subject_id", how="left")
     
-    if type == 't1_only':
-        t1_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
+    # Now we want to work only with our rois:
+    df_rois = df.copy()
+    for col in ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']:
+        df_rois[col] = df[col].apply(lambda mat: mat.iloc[rois, rois] if mat is not None else None)
+    yeo_mat_rois, labels = get_all_yeo_matrices(df_rois, region_to_yeo, rois, type, subset)
+    
+    if plot:
+        # plot mean FC matrices
+        plot_mean_FC_matrices(df_rois, rois, subset)
+        plot_mean_yeo_matrices(yeo_mat_rois, labels)
+    
+    if type == 't1_only':            
+        t1_matrices = df_rois.copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
+        #yeo_rois_t1 = pd.DataFrame(yeo_mat_all_rois).copy().drop(columns=['T2_matrix', 'T3_matrix', 'T4_matrix'])
+        yeo_rois_t1 = yeo_mat_all_rois['T1_matrix']
 
-        return t1_matrices, subjects
+        return t1_matrices, subjects, yeo_rois_t1
     
     elif type == 't1_t3_matched':
         # keep only rows where both T1 and T3 matrices are not None
-        t1_t3_matrices = df.copy().dropna(subset=['T1_matrix', 'T3_matrix'])
+        t1_t3_matrices = df_rois.copy().dropna(subset=['T1_matrix', 'T3_matrix'])
         t1_t3_matrices = t1_t3_matrices.drop(columns=['T2_matrix', 'T4_matrix'])
+        yeo_rois_t1_t3 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T4_matrix'])
         
-        return t1_t3_matrices, subjects
+        return t1_t3_matrices, subjects, yeo_rois_t1_t3
     
     elif type == 't1_t4_matched':
         # keep only rows where both T1 and T3 matrices are not None
-        t1_t4_matrices = df.copy().dropna(subset=['T1_matrix', 'T4_matrix'])
+        t1_t4_matrices = df_rois.copy().dropna(subset=['T1_matrix', 'T4_matrix'])
         t1_t4_matrices = t1_t4_matrices.drop(columns=['T2_matrix', 'T3_matrix'])
+        yeo_rois_t1_t4 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T3_matrix'])
         
-        return t1_t4_matrices, subjects
+        return t1_t4_matrices, subjects, yeo_rois_t1_t4
     
     elif type == 't1_t3':
         # keep only rows where T1 or T3 matrices are not None
-        t1_t3_matrices = df.copy().drop(columns=['T2_matrix', 'T4_matrix'])
+        t1_t3_matrices = df_rois.copy().drop(columns=['T2_matrix', 'T4_matrix'])
         t1_t3_matrices = t1_t3_matrices[~(t1_t3_matrices['T1_matrix'].isna() & t1_t3_matrices['T3_matrix'].isna())]
+        yeo_rois_t1_t3 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T4_matrix'])
         
-        return t1_t3_matrices, subjects
+        return t1_t3_matrices, subjects, yeo_rois_t1_t3
     
     elif type == 't1_t4':
         # keep only rows where T1 or T4 matrices are not None
-        t1_t4_matrices = df.copy().drop(columns=['T2_matrix', 'T3_matrix'])
+        t1_t4_matrices = df_rois.copy().drop(columns=['T2_matrix', 'T3_matrix'])
         t1_t4_matrices = t1_t4_matrices[~(t1_t4_matrices['T1_matrix'].isna() & t1_t4_matrices['T4_matrix'].isna())]
+        yeo_rois_t1_t4 = dict_of_lists_to_dataframe(yeo_mat_all_rois).drop(columns=['T2_matrix', 'T3_matrix'])
 
-        return t1_t4_matrices, subjects
+        return t1_t4_matrices, subjects, yeo_rois_t1_t4
     
-    return df, subjects
+    return df, subjects, yeo_mat_all_rois
 
 # plot the heatmap of the matrices
 def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
@@ -207,8 +231,12 @@ def plot_mean_FC_matrices(matrices, rois, subset=False):
             tick_labels = [str(pos) for pos in tick_positions]
 
         sns.heatmap(mean_matrix, ax=axes[i], cmap='viridis', cbar=True)
-        plt.xticks(ticks=tick_positions, labels=tick_labels)
-        plt.yticks(ticks=tick_positions, labels=tick_labels)
+        axes[i].set_xticks(tick_positions)
+        axes[i].set_yticks(tick_positions)
+        axes[i].set_xticklabels(tick_labels)
+        axes[i].set_yticklabels(tick_labels)
+        axes[i].tick_params(axis='x', labelrotation=45)
+        axes[i].tick_params(axis='y', labelrotation=45)
         axes[i].set_title(f'Mean FC Matrix - {timepoint}')
         axes[i].set_xlabel('ROIs')
         axes[i].set_ylabel('ROIs')
@@ -460,11 +488,15 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
 
 # STATISTICAL TESTS
-def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label=""):
+def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=""):
     '''
     Analyzes the matrices and computes the significance matrix for the function underneath.
     '''
+    print(t_matrices)
     # Initialize arrays to store t-stats and p-values
+    first_valid = next(mat for mat in t1_matrices if mat is not None)
+    rois = np.arange(first_valid.shape[0])
+
     n_rois = len(rois)
     t_stat = np.zeros((n_rois, n_rois))
     p_val = np.ones((n_rois, n_rois))
@@ -509,7 +541,26 @@ def analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label="")
 
     return significant_matrix, p_vals_corrected, reject
 
-def get_sig_matrix(df, rois, tp=3, correction=True, alpha=0.05, cluster=False):
+
+def dict_of_lists_to_dataframe(data_dict):
+    """
+    Convert a dictionary of lists to a DataFrame, padding shorter lists with None.
+    Because Yeo matrices aren't sorted by subject, and the missing matrices were considered "Missing Values", and therefore 
+    we cannot convert them to a DataFrame directly, which we want for further analysis (but we don't need the subjects).
+    """
+    # Find the maximum list length
+    max_len = max(len(v) for v in data_dict.values())
+
+    # Pad each list to the same length using None
+    padded_dict = {
+        k: v + [None] * (max_len - len(v))
+        for k, v in data_dict.items()
+    }
+
+    return pd.DataFrame(padded_dict)
+
+
+def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
     '''
     Computes the significance matrix for T1 vs T{tp} matrices, with or without clustering.
     '''
@@ -527,9 +578,8 @@ def get_sig_matrix(df, rois, tp=3, correction=True, alpha=0.05, cluster=False):
         if not t1_matrices or not t_matrices:
             raise ValueError("No matrices available for T1 or T{tp}.")
 
-        n_rois = len(rois)
 
-        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label=f"T1 vs T{tp}")
+        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}")
 
         return significant_matrix, p_vals_corrected, reject
 
@@ -553,9 +603,8 @@ def get_sig_matrix(df, rois, tp=3, correction=True, alpha=0.05, cluster=False):
             print(f"Cluster {clust} - Shape of T1 matrices: {np.shape(t1_matrices)}")
             print(f"Cluster {clust} - Shape of T{tp} matrices: {np.shape(t_matrices)}")
 
-            n_rois = len(rois)
 
-            significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, rois, correction, alpha, label=f"Cluster {clust}: T1 vs T{tp}")
+            significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"Cluster {clust}: T1 vs T{tp}")
 
             results[clust] = {
                 'significant_matrix': significant_matrix,
@@ -806,7 +855,10 @@ def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_
     
 
 def glasser_mapped_to_yeo(yeo_path):
-    # --- Load and prepare Yeo mapping ---
+    '''
+    Maps Glasser regions to Yeo networks.
+    '''
+
     yeo = pd.read_csv(yeo_path, names=['Yeo_Network'])
     yeo['Glasser_Index'] = range(1, 361)
     new_rows = pd.DataFrame({
@@ -825,7 +877,7 @@ def glasser_mapped_to_yeo(yeo_path):
     region_to_yeo['yeo_name'] = region_to_yeo['Yeo_Network'].map(yeo_label_map)
 
     return region_to_yeo
-
+'''
 def get_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
     
     matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
@@ -883,8 +935,8 @@ def get_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
         yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
         labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
         
-        return mean_yeo, labels
-
+        return mean_yeo, labels'''
+'''
 def plot_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
     """
     Plot the mean Yeo FC matrices in a 2x2 grid for T1 to T4 timepoints.
@@ -960,16 +1012,78 @@ def plot_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
 
     plt.tight_layout()
     plt.show()
+'''
 
-def get_yeo_labels(yeo_path):
-    yeo = pd.read_csv(yeo_path, names=['Yeo_Network'])
-    yeo['Glasser_Index'] = range(1, 361)
-    new_rows = pd.DataFrame({
-        'Glasser_Index': range(361, 380),
-        'Yeo_Network': 8
-    })
-    region_to_yeo = pd.concat([yeo, new_rows], ignore_index=True)
-    region_to_yeo['Yeo_Network'] = region_to_yeo['Yeo_Network'] - 1
-    region_to_yeo['Glasser_Index'] = region_to_yeo['Glasser_Index'] - 1
-    
-    return region_to_yeo
+
+def get_all_yeo_matrices(matrices, region_to_yeo, rois, type, subset=False):
+    '''
+    Computes the mean Yeo FC matrices for all timepoints (T1 to T4) and returns them in a dictionary.
+    Returns:
+    all_yeo_matrices (dict): Dictionary of timepoint -> list of subject-level matrices.
+    labels (list): Yeo network labels.
+    '''
+    matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
+    all_yeo_matrices = {}
+    yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
+    labels = None
+
+    for timepoint in matrix_columns:
+        valid_matrices = matrices[timepoint].dropna()
+        yeo_matrices = []
+
+        for mat in valid_matrices:
+            fc_matrix = mat.to_numpy()
+
+            if subset:
+                subset_map = region_to_yeo[region_to_yeo['Glasser_Index'].isin(rois)].copy()
+            else:
+                subset_map = region_to_yeo.copy()
+
+            index_map = {roi: i for i, roi in enumerate(rois)}
+            subset_map = subset_map[subset_map['Glasser_Index'].isin(index_map)]
+
+            network_to_indices = subset_map.groupby('Yeo_Network')['Glasser_Index'].apply(list).to_dict()
+            key_list = sorted(network_to_indices.keys())
+            key_to_idx = {k: i for i, k in enumerate(key_list)}
+            num_networks = len(key_list)
+
+            yeo_fc = np.zeros((num_networks, num_networks))
+
+            for i in key_list:
+                for j in key_list:
+                    idx_i = [index_map[g] for g in network_to_indices[i]]
+                    idx_j = [index_map[g] for g in network_to_indices[j]]
+                    submatrix = fc_matrix[np.ix_(idx_i, idx_j)]
+                    yeo_fc[key_to_idx[i], key_to_idx[j]] = submatrix.mean()
+
+            yeo_matrices.append(yeo_fc)
+
+        all_yeo_matrices[timepoint] = yeo_matrices
+
+        if labels is None:
+            labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
+
+    return all_yeo_matrices, labels
+
+def plot_mean_yeo_matrices(all_yeo_matrices, labels):
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+
+    for idx, (timepoint, yeo_matrices) in enumerate(all_yeo_matrices.items()):
+        if len(yeo_matrices) == 0:
+            axes[idx].axis('off')
+            axes[idx].set_title(f'No data for {timepoint}')
+            continue
+
+        mean_yeo = np.nanmean(np.stack(yeo_matrices), axis=0)
+
+        sns.heatmap(mean_yeo, ax=axes[idx], cmap='coolwarm', annot=True, fmt=".2f",
+                    xticklabels=labels, yticklabels=labels)
+        axes[idx].set_title(f"Mean Yeo FC - {timepoint}")
+        axes[idx].set_xlabel("Yeo Network")
+        axes[idx].set_ylabel("Yeo Network")
+        axes[idx].tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    plt.show()
