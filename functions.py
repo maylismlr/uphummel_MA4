@@ -700,6 +700,10 @@ def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_m
                 rows.append(entry)
 
     summary_df = pd.DataFrame(rows)
+    
+    if summary_df.empty:
+        return pd.DataFrame(columns=['ROI_1', 'ROI_2', 'Comparison', 'p_value', 'effect_size'])
+
 
     # Put 'Cluster' first if it exists
     if cluster_label is not None and not summary_df.empty:
