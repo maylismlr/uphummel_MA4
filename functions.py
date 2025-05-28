@@ -568,8 +568,14 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
 
     if not cluster:
         # Whole dataset
+        # Assume all matrices have same labels as first non-null matrix
+        first_valid = next(matrix for matrix in df['T1_matrix'] if matrix is not None)
+        roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(379)  # fallback
+
+        # Convert to arrays
         t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix'] if matrix is not None]
         t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix'] if matrix is not None]
+
 
         print("Shape of T1 matrices:", np.shape(t1_matrices))
         print(f"Shape of T{tp} matrices:", np.shape(t_matrices))
@@ -579,8 +585,12 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
 
 
         significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}")
+        
+        significant_matrix_df = pd.DataFrame(significant_matrix, index=roi_labels, columns=roi_labels)
+        p_vals_df = pd.DataFrame(p_vals_corrected, index=roi_labels, columns=roi_labels)
+        reject_df = pd.DataFrame(reject, index=roi_labels, columns=roi_labels)
 
-        return significant_matrix, p_vals_corrected, reject
+        return significant_matrix_df, p_vals_df, reject_df
 
     else:
         # By cluster
@@ -603,13 +613,26 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
             print(f"Cluster {clust} - Shape of T{tp} matrices: {np.shape(t_matrices)}")
 
 
-            significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"Cluster {clust}: T1 vs T{tp}")
+            # Get ROI labels from one valid matrix
+            first_valid = cluster_df['T1_matrix'].dropna().iloc[0]
+            roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(379)
+
+            # Run stats
+            significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha,
+                                                                            label=f"Cluster {clust}: T1 vs T{tp}")
+
+            # Convert outputs to DataFrames with labels
+            significant_matrix_df = pd.DataFrame(significant_matrix, index=roi_labels, columns=roi_labels)
+            p_vals_df = pd.DataFrame(p_vals_corrected, index=roi_labels, columns=roi_labels)
+            reject_df = pd.DataFrame(reject, index=roi_labels, columns=roi_labels)
+
 
             results[clust] = {
-                'significant_matrix': significant_matrix,
-                'p_corrected': p_vals_corrected,
-                'reject': reject
+            'significant_matrix': significant_matrix_df,
+            'p_corrected': p_vals_df,
+            'reject': reject_df
             }
+
 
         return results
 
@@ -668,7 +691,7 @@ def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_m
     
 
     Args:
-        p_values_matrix (np.array): Matrix of p-values
+        p_values_matrix (np.array): Matrix of p-values ! But since we get dataframes after get_sig_matrix, wa have to use .values !!
         effect_size_matrix (np.array): Matrix of effect sizes
         roi_mapping (dict): Mapping ROI index -> region name
         when using yeo, use this: roi_mapping_yeo = {i: label for i, label in enumerate(yeo_labels)}
@@ -683,11 +706,11 @@ def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_m
 
     for i in range(n_rois):
         for j in range(i + 1, n_rois):  # upper triangle only
-            p_val = p_values_matrix[i, j]
+            p_val = p_values_matrix.iloc[i, j] if isinstance(p_values_matrix, pd.DataFrame) else p_values_matrix[i, j]
             if p_val < alpha:
                 roi_1 = roi_mapping.get(i, f"ROI_{i}")
                 roi_2 = roi_mapping.get(j, f"ROI_{j}")
-                effect = effect_size_matrix[i, j]
+                effect = effect_size_matrix.iloc[i, j] if isinstance(effect_size_matrix, pd.DataFrame) else effect_size_matrix[i, j]
                 entry = {
                     'ROI_1': roi_1,
                     'ROI_2': roi_2,

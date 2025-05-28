@@ -48,7 +48,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(all_matrices, correction=correction, alpha=alpha, cluster=cluster) #for tp = 3
             
             summary = functions.summarize_significant_differences(
-                p_vals_corrected,
+                p_vals_corrected.values,
                 significant_matrix,
                 roi_mapping_glasser,
                 alpha=alpha
@@ -73,7 +73,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 effect_size_matrix = results[clust]['significant_matrix']  # Attention: ici il faut être sûr que c'est bien l'effect size
 
                 summary = functions.summarize_significant_differences(
-                    p_values_matrix,
+                    p_values_matrix.values,
                     effect_size_matrix,
                     roi_mapping_glasser,
                     cluster_label=clust
@@ -107,7 +107,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 effect_size_matrix = results[clust]['significant_matrix']  # Attention: ici il faut être sûr que c'est bien l'effect size
 
                 summary = functions.summarize_significant_differences(
-                    p_values_matrix,
+                    p_values_matrix.values,
                     effect_size_matrix,
                     roi_mapping_glasser,
                     cluster_label=clust
@@ -140,7 +140,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t3_matrices, correction=correction, alpha=alpha, cluster=cluster)
             
             summary = functions.summarize_significant_differences(
-                p_vals_corrected,
+                p_vals_corrected.values,
                 significant_matrix,
                 roi_mapping_glasser,
                 alpha=alpha
@@ -152,7 +152,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False)
 
             summary = functions.summarize_significant_differences(
-                            p_vals_corrected,
+                            p_vals_corrected.values,
                             significant_matrix,
                             roi_mapping_yeo,
                             alpha=0.05
@@ -181,7 +181,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 effect_size_matrix = results[clust]['significant_matrix']  # Attention: ici il faut être sûr que c'est bien l'effect size
 
                 summary = functions.summarize_significant_differences(
-                    p_values_matrix,
+                    p_values_matrix.values,
                     effect_size_matrix,
                     roi_mapping_glasser,
                     cluster_label=clust
@@ -213,7 +213,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matrices, tp=4, correction=correction, alpha=alpha, cluster=cluster)
             
             summary = functions.summarize_significant_differences(
-                p_vals_corrected,
+                p_vals_corrected.values,
                 significant_matrix,
                 roi_mapping_glasser,
                 alpha=alpha
@@ -225,7 +225,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False)
 
             summary = functions.summarize_significant_differences(
-                            p_vals_corrected,
+                            p_vals_corrected.values,
                             significant_matrix,
                             roi_mapping_yeo,
                             alpha=0.05
@@ -254,7 +254,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 effect_size_matrix = results[clust]['significant_matrix']  # Attention: ici il faut être sûr que c'est bien l'effect size
 
                 summary = functions.summarize_significant_differences(
-                    p_values_matrix,
+                    p_values_matrix.values,
                     effect_size_matrix,
                     roi_mapping_glasser,
                     cluster_label=clust
@@ -286,7 +286,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t3_matched, correction=correction, alpha=alpha, cluster=cluster)
             
             summary = functions.summarize_significant_differences(
-                p_vals_corrected,
+                p_vals_corrected.values,
                 significant_matrix,
                 roi_mapping_glasser,
                 alpha=alpha
@@ -298,7 +298,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False)
 
             summary = functions.summarize_significant_differences(
-                            p_vals_corrected,
+                            p_vals_corrected.values,
                             significant_matrix,
                             roi_mapping_yeo,
                             alpha=0.05
@@ -327,7 +327,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 effect_size_matrix = results[clust]['significant_matrix']  # Attention: ici il faut être sûr que c'est bien l'effect size
 
                 summary = functions.summarize_significant_differences(
-                    p_values_matrix,
+                    p_values_matrix.values,
                     effect_size_matrix,
                     roi_mapping_glasser,
                     cluster_label=clust
@@ -360,7 +360,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matched, tp=4, correction=correction, alpha=alpha, cluster=cluster)
             
             summary = functions.summarize_significant_differences(
-                p_vals_corrected,
+                p_vals_corrected.values,
                 significant_matrix,
                 roi_mapping_glasser,
                 alpha=alpha
@@ -372,7 +372,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False)
 
             summary = functions.summarize_significant_differences(
-                            p_vals_corrected,
+                            p_vals_corrected.values,
                             significant_matrix,
                             roi_mapping_yeo,
                             alpha=0.05
@@ -401,7 +401,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 effect_size_matrix = results[clust]['significant_matrix']  # Attention: ici il faut être sûr que c'est bien l'effect size
 
                 summary = functions.summarize_significant_differences(
-                    p_values_matrix,
+                    p_values_matrix.values,
                     effect_size_matrix,
                     roi_mapping_glasser,
                     cluster_label=clust
