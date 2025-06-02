@@ -488,30 +488,25 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
 
 # STATISTICAL TESTS
-def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=""):
+def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None):
     '''
     Analyzes the matrices and computes the significance matrix for the function underneath.
     '''
-    # Initialize arrays to store t-stats and p-values
-    first_valid = next(mat for mat in t1_matrices if mat is not None)
-    rois = np.arange(first_valid.shape[0])
+    if roi_labels is None:
+        roi_labels = np.arange(t1_matrices[0].shape[0])
 
-    n_rois = len(rois)
+    n_rois = len(roi_labels)
     t_stat = np.zeros((n_rois, n_rois))
     p_val = np.ones((n_rois, n_rois))
 
-    # Loop over each cell (i,j)
     for i in tqdm(range(n_rois)):
         for j in range(n_rois):
             t1_values = np.array([mat[i, j] for mat in t1_matrices])
             t_values = np.array([mat[i, j] for mat in t_matrices])
-
-            # Perform independent t-test
             stat, p = ttest_ind(t1_values, t_values, equal_var=True)
             t_stat[i, j] = stat
             p_val[i, j] = p
 
-    # Flatten p-values for correction
     p_val_flat = p_val.ravel()
 
     if correction:
@@ -521,24 +516,32 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=""):
         reject = np.zeros_like(p_val_flat, dtype=bool)
         reject[p_vals_corrected < alpha] = True
 
-    # Reshape
     p_vals_corrected = p_vals_corrected.reshape(p_val.shape)
     reject = reject.reshape(p_val.shape)
-
-    # Create significance matrix
     significant_matrix = np.zeros_like(p_val, dtype=int)
     significant_matrix[reject] = 1
 
-    # Plot
+    # Proper plotting with ROI labels
     plt.figure(figsize=(6, 5))
-    sns.heatmap(significant_matrix, cmap='viridis', cbar=True, annot=False, square=True, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
+    sns.heatmap(
+        significant_matrix,
+        cmap='viridis',
+        cbar=True,
+        annot=False,
+        square=True,
+        vmin=0,
+        vmax=1,
+        xticklabels=roi_labels,
+        yticklabels=roi_labels
+    )
     plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.tight_layout()
-    plt.show();
+    plt.show()
 
     return significant_matrix, p_vals_corrected, reject
+
 
 
 def dict_of_lists_to_dataframe(data_dict):
@@ -578,13 +581,14 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
 
 
         print("Shape of T1 matrices:", np.shape(t1_matrices))
+        print("type of T1 matrices:", type(t1_matrices))
         print(f"Shape of T{tp} matrices:", np.shape(t_matrices))
 
         if not t1_matrices or not t_matrices:
             raise ValueError("No matrices available for T1 or T{tp}.")
 
 
-        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}")
+        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}", roi_labels=roi_labels)
         
         significant_matrix_df = pd.DataFrame(significant_matrix, index=roi_labels, columns=roi_labels)
         p_vals_df = pd.DataFrame(p_vals_corrected, index=roi_labels, columns=roi_labels)
