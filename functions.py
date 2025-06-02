@@ -162,7 +162,7 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, type = 'all', plot = Fals
 
         return t1_t4_matrices, subjects, yeo_rois_t1_t4, roi_mapping_yeo
     
-    return df, subjects, yeo_mat_all_rois, roi_mapping_yeo
+    return df_rois, subjects, yeo_mat_all_rois, roi_mapping_yeo
 
 # plot the heatmap of the matrices
 def plot_all_subject_matrices(subject_matrices, subjects, rois, type='t1_t3'):
@@ -236,7 +236,7 @@ def plot_mean_FC_matrices(matrices, rois, subset=False):
         axes[i].set_xticklabels(tick_labels)
         axes[i].set_yticklabels(tick_labels)
         axes[i].tick_params(axis='x', labelrotation=45)
-        axes[i].tick_params(axis='y', labelrotation=45)
+        axes[i].tick_params(axis='y')
         axes[i].set_title(f'Mean FC Matrix - {timepoint}')
         axes[i].set_xlabel('ROIs')
         axes[i].set_ylabel('ROIs')
@@ -531,8 +531,8 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
         square=True,
         vmin=0,
         vmax=1,
-        xticklabels=roi_labels,
-        yticklabels=roi_labels
+        xticklabels=roi_labels+1,
+        yticklabels=roi_labels+1
     )
     plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
     plt.xlabel("ROIs")
@@ -573,7 +573,7 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
         # Whole dataset
         # Assume all matrices have same labels as first non-null matrix
         first_valid = next(matrix for matrix in df['T1_matrix'] if matrix is not None)
-        roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(379)  # fallback
+        roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(first_valid.shape[0])
 
         # Convert to arrays
         t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix'] if matrix is not None]
