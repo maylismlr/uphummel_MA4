@@ -566,6 +566,56 @@ def dict_of_lists_to_dataframe(data_dict):
     return pd.DataFrame(padded_dict)
 
 
+
+def test_fc_differences_normality(df, tp=3):
+    """
+    Test normality (Shapiro-Wilk) of FC differences (T{tp} - T1) for each ROI pair in selected ROIs.
+    
+    Args:
+        df (pd.DataFrame): DataFrame with 'T1_matrix' and f'T{tp}_matrix' columns containing FC matrices.
+        rois (list or np.array): List of ROI indices to include (e.g., 33 ROIs).
+        tp (int): Timepoint to compare with T1 (default: 3 → T3).
+        
+    Returns:
+        pd.DataFrame: Results with ROI pairs, W-statistics, p-values, and normality flag.
+    """
+    results = []
+    n = len(df)
+    first_valid = next(matrix for matrix in df['T1_matrix'] if matrix is not None)
+    rois =  np.arange(first_valid.shape[0])
+    print(rois)
+
+    for i in tqdm(rois, desc="Testing normality of FC differences"):
+        for j in rois:
+            if i >= j:
+                continue  # Skip lower triangle and diagonal
+
+            diffs = []
+            for _, row in df.iterrows():
+                t1 = row['T1_matrix']
+                tX = row[f'T{tp}_matrix']
+                if t1 is not None and tX is not None:
+                    val_t1 = t1.iloc[i, j]
+                    val_tX = tX.iloc[i, j]
+                    if not np.isnan(val_t1) and not np.isnan(val_tX):
+                        diffs.append(val_tX - val_t1)
+
+            if len(diffs) >= 3:
+                stat, p = shapiro(diffs)
+                normal = p > 0.05
+                results.append({
+                    'ROI_1': i,
+                    'ROI_2': j,
+                    'W_stat': stat,
+                    'p_value': p,
+                    'Normal': normal,
+                    'n': len(diffs)
+                })
+
+    return pd.DataFrame(results)
+
+
+
 def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched=False):
     '''
     Computes the significance matrix for T1 vs T{tp} matrices, with or without clustering.
