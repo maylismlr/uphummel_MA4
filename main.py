@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
-def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = False, alpha = 0.05, split_L_R = False, plot = True, subset = False):
+def main(rois, request_type = 'all', cluster = False, num_clusters = 2, correction = False, alpha = 0.05, split_L_R = False, plot = True, subset = False):
     # Folder containing the data
     mat_folder_path = "FC_matrices_times_wp11/"
     excel_folder_path = "data/"
@@ -23,13 +23,13 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
     
     regression_info, rsfMRI_full_info = functions.load_excel_data(excel_folder_path)
 
-    if type == 'all':
+    if request_type == 'all':
         # Load the data
-        all_matrices, subjects, yeo_all_rois, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        all_matrices, subjects, yeo_all_rois, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, request_type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(all_matrices, subjects, type = type)
+        functions.plot_all_subject_matrices(all_matrices, subjects, request_type = request_type)
         
         # perform longitudinal analysis on tasks
         if split_L_R == True:
@@ -53,7 +53,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 roi_mapping_glasser,
                 alpha=alpha
             )
-            print(f"Top significant connections for type {type}:")
+            print(f"Top significant connections for request_type {request_type}:")
             print(summary.head(10))
 
         elif cluster == True:
@@ -83,12 +83,12 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 print(summary.head(10))
 
     
-    elif type == 't1_only':
-        t1_matrices, subjects, yeo_rois_t1, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+    elif request_type == 't1_only':
+        t1_matrices, subjects, yeo_rois_t1, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, request_type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_matrices, subjects, type = type, rois=rois)
+        functions.plot_all_subject_matrices(t1_matrices, subjects, request_type = request_type, rois=rois)
         
         
         if cluster == True: # not sure if this is important to know ...
@@ -117,13 +117,13 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 print(summary.head(10))
                
 
-    elif type == 't1_t3':
+    elif request_type == 't1_t3':
         print("doing load matrices")
-        t1_t3_matrices, subjects, yeo_rois_t1_t3, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+        t1_t3_matrices, subjects, yeo_rois_t1_t3, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, request_type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t3_matrices, subjects, rois=rois, type = type)
+        functions.plot_all_subject_matrices(t1_t3_matrices, subjects, rois=rois, request_type = request_type)
         
         # perform longitudinal analysis on tasks
         if split_L_R == True:
@@ -146,7 +146,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 alpha=alpha
             )
             
-            print(f"Top significant connections (Glasser atlas) for type {type}:")
+            print(f"Top significant connections (Glasser atlas) for request_type {request_type}:")
             print(summary.head(10))
             
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False)
@@ -158,7 +158,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                             alpha=0.05
                         )
             
-            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(f"Top significant connections (Yeo atlas) for request_type {request_type}:")
             print(summary.head(10))
         
         if cluster == True:
@@ -191,12 +191,12 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 print(summary.head(10))
 
 
-    elif type == 't1_t4':
-        t1_t4_matrices, subjects, yeo_rois_t1_t4, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+    elif request_type == 't1_t4':
+        t1_t4_matrices, subjects, yeo_rois_t1_t4, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, request_type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t4_matrices, subjects, rois=rois, type = type)
+        functions.plot_all_subject_matrices(t1_t4_matrices, subjects, rois=rois, request_type = request_type)
         
         # perform longitudinal analysis on tasks
         if split_L_R == True:
@@ -219,7 +219,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 alpha=alpha
             )
             
-            print(f"Top significant connections for type {type}:")
+            print(f"Top significant connections for request_type {request_type}:")
             print(summary.head(10))
             
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False)
@@ -231,7 +231,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                             alpha=0.05
                         )
             
-            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(f"Top significant connections (Yeo atlas) for request_type {request_type}:")
             print(summary.head(10))
         
         elif cluster == True:
@@ -264,12 +264,12 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 print(summary.head(10))
       
         
-    elif type == 't1_t3_matched':
-        t1_t3_matched, subjects, yeo_rois_t1_t3, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+    elif request_type == 't1_t3_matched':
+        t1_t3_matched, subjects, yeo_rois_t1_t3, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, request_type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t3_matched, subjects, rois=rois, type = type)
+        functions.plot_all_subject_matrices(t1_t3_matched, subjects, rois=rois, request_type = request_type)
         
         # perform longitudinal analysis on tasks
         if split_L_R == True:
@@ -292,7 +292,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 alpha=alpha
             )
             
-            print(f"Top significant connections for type {type}:")
+            print(f"Top significant connections for request_type {request_type}:")
             print(summary.head(10)) 
             
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False, matched=True)
@@ -304,7 +304,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                             alpha=0.05
                         )
             
-            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(f"Top significant connections (Yeo atlas) for request_type {request_type}:")
             print(summary.head(10))
         
         elif cluster == True:
@@ -338,12 +338,12 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
 
 
     
-    elif type == 't1_t4_matched':
-        t1_t4_matched, subjects, yeo_rois_t1_t4, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, type)
+    elif request_type == 't1_t4_matched':
+        t1_t4_matched, subjects, yeo_rois_t1_t4, roi_mapping_yeo = functions.load_matrices(mat_folder_path, rsfMRI_full_info, rois, request_type)
         
         # plot the heatmaps of the FC matrices
         print("Plotting all matrices...")
-        functions.plot_all_subject_matrices(t1_t4_matched, subjects, rois=rois, type = type)
+        functions.plot_all_subject_matrices(t1_t4_matched, subjects, rois=rois, request_type = request_type)
         
         # perform longitudinal analysis on tasks
         if split_L_R == True:
@@ -366,7 +366,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                 alpha=alpha
             )
             
-            print(f"Top significant connections for type {type}:")
+            print(f"Top significant connections for request_type {request_type}:")
             print(summary.head(10))
             
             significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False, matched=True)
@@ -378,7 +378,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
                             alpha=0.05
                         )
             
-            print(f"Top significant connections (Yeo atlas) for type {type}:")
+            print(f"Top significant connections (Yeo atlas) for request_type {request_type}:")
             print(summary.head(10))
         
         elif cluster == True:
@@ -413,7 +413,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
 
     
     else:
-        raise ValueError("Invalid type. Choose from 'all', 't1_only', 't1_t3', 't1_t4', 't1_t3_matched', or 't1_t4_matched'.")
+        raise ValueError("Invalid request_type. Choose from 'all', 't1_only', 't1_t3', 't1_t4', 't1_t3_matched', or 't1_t4_matched'.")
     
     return None
 
@@ -422,4 +422,4 @@ if __name__ == "__main__":
     # Run the main function
     rois = [363, 364, 365, 368, 372, 373, 374, 377, 379, 361, 370, 362, 371, 12, 54, 56, 78, 96, 192, 234, 236, 258, 276, 8, 9, 51, 52, 53, 188, 189, 231, 232, 233]
     rois = [roi - 1 for roi in rois]
-    main(rois, type='t1_t4', cluster=True, num_clusters=2, split_L_R=True)
+    main(rois, request_type='t1_t4', cluster=True, num_clusters=2, split_L_R=True)
