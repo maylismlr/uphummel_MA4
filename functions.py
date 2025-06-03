@@ -488,7 +488,7 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
 
 # STATISTICAL TESTS
-def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None):
+def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None, matched=False):
     '''
     Analyzes the matrices and computes the significance matrix for the function underneath.
     '''
@@ -503,7 +503,11 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
         for j in range(n_rois):
             t1_values = np.array([mat[i, j] for mat in t1_matrices])
             t_values = np.array([mat[i, j] for mat in t_matrices])
-            stat, p = ttest_ind(t1_values, t_values, equal_var=True)
+            if matched:
+                stat, p = ttest_rel(t1_values, t_values)
+            
+            elif not matched:
+                stat, p = ttest_ind(t1_values, t_values, equal_var=True)
             t_stat[i, j] = stat
             p_val[i, j] = p
 
@@ -562,7 +566,7 @@ def dict_of_lists_to_dataframe(data_dict):
     return pd.DataFrame(padded_dict)
 
 
-def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
+def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched=False):
     '''
     Computes the significance matrix for T1 vs T{tp} matrices, with or without clustering.
     '''
@@ -587,8 +591,7 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False):
         if not t1_matrices or not t_matrices:
             raise ValueError("No matrices available for T1 or T{tp}.")
 
-
-        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}", roi_labels=roi_labels)
+        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}", roi_labels=roi_labels, matched=matched)
         
         significant_matrix_df = pd.DataFrame(significant_matrix, index=roi_labels, columns=roi_labels)
         p_vals_df = pd.DataFrame(p_vals_corrected, index=roi_labels, columns=roi_labels)

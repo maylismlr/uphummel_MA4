@@ -174,7 +174,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            results = functions.get_sig_matrix(t1_t3_matrices_clustered_v2, correction=correction, alpha=alpha, cluster=cluster)
+            results = functions.get_sig_matrix(t1_t3_matrices_clustered_v2, correction=correction, alpha=alpha, cluster=cluster, matched=True)
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
@@ -247,7 +247,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            results = functions.get_sig_matrix(t1_t4_matrices_clustered_v2, tp=4, correction=correction, alpha=alpha, cluster=cluster)
+            results = functions.get_sig_matrix(t1_t4_matrices_clustered_v2, tp=4, correction=correction, alpha=alpha, cluster=cluster, matched=True)
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
@@ -283,7 +283,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
         if cluster == False:
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t3_matched, correction=correction, alpha=alpha, cluster=cluster)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t3_matched, correction=correction, alpha=alpha, cluster=cluster, matched=True)
             
             summary = functions.summarize_significant_differences(
                 p_vals_corrected.values,
@@ -295,7 +295,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             print(f"Top significant connections for type {type}:")
             print(summary.head(10)) 
             
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t3, correction=False, alpha=0.05, cluster=False, matched=True)
 
             summary = functions.summarize_significant_differences(
                             p_vals_corrected.values,
@@ -320,7 +320,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            results = functions.get_sig_matrix(t1_t3_matched_clustered_v2, correction=correction, alpha=alpha, cluster=cluster)
+            results = functions.get_sig_matrix(t1_t3_matched_clustered_v2, correction=correction, alpha=alpha, cluster=cluster, matched=True)
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
@@ -357,7 +357,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
         if cluster == False:
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matched, tp=4, correction=correction, alpha=alpha, cluster=cluster)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(t1_t4_matched, tp=4, correction=correction, alpha=alpha, cluster=cluster, matched=True)
             
             summary = functions.summarize_significant_differences(
                 p_vals_corrected.values,
@@ -369,7 +369,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             print(f"Top significant connections for type {type}:")
             print(summary.head(10))
             
-            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False)
+            significant_matrix, p_vals_corrected, reject = functions.get_sig_matrix(yeo_rois_t1_t4, tp=4, correction=False, alpha=0.05, cluster=False, matched=True)
 
             summary = functions.summarize_significant_differences(
                             p_vals_corrected.values,
@@ -394,7 +394,7 @@ def main(rois, type = 'all', cluster = False, num_clusters = 2, correction = Fal
             
             # plot the significant differences between the matrices
             print("Plotting significant differences...")
-            results = functions.get_sig_matrix(t1_t4_matched_clustered_v2, tp=4, correction=correction, alpha=alpha, cluster=cluster)
+            results = functions.get_sig_matrix(t1_t4_matched_clustered_v2, tp=4, correction=correction, alpha=alpha, cluster=cluster, matched=True)
             
             for clust in results.keys():
                 p_values_matrix = results[clust]['p_corrected']
