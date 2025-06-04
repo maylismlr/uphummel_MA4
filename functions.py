@@ -501,10 +501,6 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
 # STATISTICAL TESTS
 def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None, matched=False):
-    '''
-    Analyzes the matrices and computes the significance matrix for the function underneath.
-    '''
-    print(roi_labels)
     if roi_labels is None:
         roi_labels = np.arange(t1_matrices[0].shape[0])
 
@@ -514,18 +510,24 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
 
     for i in tqdm(range(n_rois)):
         for j in range(n_rois):
-            t1_values = np.array([mat[i, j] for mat in t1_matrices])
-            t_values = np.array([mat[i, j] for mat in t_matrices])
+            # Use iloc if matrices are labeled
+            if isinstance(t1_matrices[0], pd.DataFrame):
+                t1_values = np.array([mat.iloc[i, j] for mat in t1_matrices])
+                t_values = np.array([mat.iloc[i, j] for mat in t_matrices])
+            else:
+                t1_values = np.array([mat[i, j] for mat in t1_matrices])
+                t_values = np.array([mat[i, j] for mat in t_matrices])
+
             if matched:
-                stat, p = ttest_rel(t1_values, t_values)
-            
-            elif not matched:
-                stat, p = ttest_ind(t1_values, t_values, equal_var=True)
+                stat, p = ttest_rel(t1_values, t_values, nan_policy='omit')
+            else:
+                stat, p = ttest_ind(t1_values, t_values, equal_var=True, nan_policy='omit')
+
             t_stat[i, j] = stat
             p_val[i, j] = p
 
+    # FDR correction
     p_val_flat = p_val.ravel()
-
     if correction:
         reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='fdr_bh')
     else:
@@ -537,15 +539,8 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
     reject = reject.reshape(p_val.shape)
     significant_matrix = np.zeros_like(p_val, dtype=int)
     significant_matrix[reject] = 1
-    if type(roi_labels) is dict:
-        xticklabels=[roi_labels.get(l, l) for l in roi_labels],
-        yticklabels=[roi_labels.get(l, l) for l in roi_labels]
 
-    else:
-        xticklabels=roi_labels+1
-        yticklabels=roi_labels+1
-
-    # Proper plotting with ROI labels
+    # Plot
     plt.figure(figsize=(6, 5))
     sns.heatmap(
         significant_matrix,
@@ -555,16 +550,89 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
         square=True,
         vmin=0,
         vmax=1,
-        xticklabels=yticklabels,
-        yticklabels=yticklabels
+        xticklabels=roi_labels,
+        yticklabels=roi_labels
     )
     plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
     plt.tight_layout()
     plt.show()
 
     return significant_matrix, p_vals_corrected, reject
+
+
+
+def create_roi_hemisphere_map(n_rois=379):
+    roi_to_hemi = {}
+    for roi in range(n_rois):
+        if roi < 180:
+            roi_to_hemi[roi] = 'L'
+        elif roi < 360:
+            roi_to_hemi[roi] = 'R'
+        elif 360 <= roi <= 367:
+            roi_to_hemi[roi] = 'L'  # Left subcortical
+        elif 368 <= roi <= 378:
+            roi_to_hemi[roi] = 'R'  # Right subcortical
+        elif roi == 378:
+            roi_to_hemi[roi] = 'None'  # Cerebellum (not lateralized)
+        else:
+            roi_to_hemi[roi] = 'Cerebellum'  # Cerebellum (not lateralized)
+    return roi_to_hemi
+
+
+
+def reorient_t1_t3(df, selected_rois, roi_mapping, tp = 3):
+
+    hemi_map = create_roi_hemisphere_map()
+    left_rois = [r for r in selected_rois if hemi_map[r] == 'L']
+    right_rois = [r for r in selected_rois if hemi_map[r] == 'R']
+
+    aligned_t1 = []
+    aligned_t = []
+    new_labels = None
+
+    for _, row in df.iterrows():
+        mat1 = row['T1_matrix']
+        mat = row[f'T{tp}_matrix']
+        lesion = row['Lesion_side']
+        if mat1 is None or mat is None or lesion not in ['L', 'R']:
+            continue
+
+        if lesion == 'L':
+            ipsi = left_rois
+            contra = right_rois
+        else:
+            ipsi = right_rois
+            contra = left_rois
+
+        roi_order = ipsi + contra
+        
+        # Cleaned labels directly, no nested reprocessing
+        clean = lambda x: x.replace('L_', '').replace('R_', '').replace('_L', '').replace('_R', '')
+        cleaned_ipsi_labels = [roi_mapping[r].replace('L_', '').replace('R_', '') + '_ipsi' for r in ipsi]
+        cleaned_contra_labels = [roi_mapping[r].replace('L_', '').replace('R_', '') + '_contra' for r in contra]
+        cleaned_ipsi_labels = [clean(label) for label in cleaned_ipsi_labels]
+        cleaned_contra_labels = [clean(label) for label in cleaned_contra_labels]
+        new_labels = cleaned_ipsi_labels + cleaned_contra_labels
+
+        #new_labels = [f"{roi_mapping[r]}_ipsi" for r in ipsi] + [f"{roi_mapping[r]}_contra" for r in contra]
+        
+        #new_labels = [new_labels[r].replace('L_', '').replace('R_', '') for r in ipsi] + \
+        #     [new_labels[r].replace('L_', '').replace('R_', '') for r in contra]
+
+
+        mat1_re = mat1.loc[roi_order, roi_order]
+        mat_re = mat.loc[roi_order, roi_order]
+        mat1_re.index = mat1_re.columns = new_labels
+        mat_re.index = mat_re.columns = new_labels
+
+        aligned_t1.append(mat1_re)
+        aligned_t.append(mat_re)
+
+    return aligned_t1, aligned_t, new_labels
 
 
 
@@ -636,82 +704,98 @@ def test_fc_differences_normality(df, tp=3):
 
 
 
-def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched=False, roi_labels=None):
+def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched=False, roi_labels=None, contra_ipsi_split=False, selected_rois=None, roi_mapping=None):
     '''
-    Computes the significance matrix for T1 vs T{tp} matrices, with or without clustering.
+    Computes the significance matrix for T1 vs T{tp} matrices.
+    Supports clustering and contra/ipsi standardization.
     '''
-
     results = {}
 
-    if not cluster:
-        # Whole dataset
-        # Assume all matrices have same labels as first non-null matrix
-        first_valid = next(matrix for matrix in df['T1_matrix'] if matrix is not None)
-        
-        if roi_labels is None:
-            roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(first_valid.shape[0])
+    # --------- Contra/Ipsi Comparison Path ---------
+    if contra_ipsi_split:
+        if selected_rois is None or roi_mapping is None:
+            raise ValueError("Must provide `selected_rois` and `roi_mapping` for contra_ipsi_split.")
 
-        # Convert to arrays
-        t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix'] if matrix is not None]
-        t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df[f'T{tp}_matrix'] if matrix is not None]
-
-
-        print("Shape of T1 matrices:", np.shape(t1_matrices))
-        print("type of T1 matrices:", type(t1_matrices))
-        print(f"Shape of T{tp} matrices:", np.shape(t_matrices))
+        # Reorient matrices into standardized ipsi/contra format
+        t1_matrices, t_matrices, aligned_labels = reorient_t1_t3(df, selected_rois, roi_mapping, tp=tp)
 
         if not t1_matrices or not t_matrices:
-            raise ValueError("No matrices available for T1 or T{tp}.")
+            raise ValueError("No valid T1 or T{tp} matrices available after reorientation.")
 
-        significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha, label=f"T1 vs T{tp}", roi_labels=roi_labels, matched=matched)
+        sig_matrix, p_corr, reject = analyze_matrices(
+            t1_matrices, t_matrices,
+            correction=correction,
+            alpha=alpha,
+            label=f"Ipsi vs Contra FC (T1 vs T{tp})",
+            roi_labels=aligned_labels,
+            matched=matched
+        )
+
+        return pd.DataFrame(sig_matrix, index=aligned_labels, columns=aligned_labels), \
+               pd.DataFrame(p_corr, index=aligned_labels, columns=aligned_labels), \
+               pd.DataFrame(reject, index=aligned_labels, columns=aligned_labels), \
+               aligned_labels
+
+    # --------- Non-cluster, standard FC path ---------
+    elif not cluster:
+        first_valid = next(matrix for matrix in df['T1_matrix'] if matrix is not None)
+        if roi_labels is None:
+            roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(first_valid.shape[0])
         
-        significant_matrix_df = pd.DataFrame(significant_matrix, index=roi_labels, columns=roi_labels)
-        p_vals_df = pd.DataFrame(p_vals_corrected, index=roi_labels, columns=roi_labels)
-        reject_df = pd.DataFrame(reject, index=roi_labels, columns=roi_labels)
+        if isinstance(roi_mapping, dict):
+            try:
+                roi_labels = [roi_mapping.get(i, f"ROI_{i}") for i in roi_labels]
+            except Exception as e:
+                print("Warning: Failed to apply roi_mapping to labels:", e)
 
-        return significant_matrix_df, p_vals_df, reject_df
+        t1_matrices = [m for m in df['T1_matrix'] if m is not None]
+        t_matrices = [m for m in df[f'T{tp}_matrix'] if m is not None]
 
+        print("Shape of T1 matrices:", np.shape(t1_matrices))
+        print("Shape of T{tp} matrices:", np.shape(t_matrices))
+
+        sig_matrix, p_corr, reject = analyze_matrices(
+            t1_matrices, t_matrices,
+            correction=correction,
+            alpha=alpha,
+            label=f"T1 vs T{tp}",
+            roi_labels=roi_labels,
+            matched=matched
+        )
+
+        return pd.DataFrame(sig_matrix, index=roi_labels, columns=roi_labels), \
+               pd.DataFrame(p_corr, index=roi_labels, columns=roi_labels), \
+               pd.DataFrame(reject, index=roi_labels, columns=roi_labels)
+
+    # --------- Clustered FC path ---------
     else:
-        # By cluster
         clusters = sorted(df['cluster'].dropna().unique())
-
         for clust in clusters:
             print(f"\nAnalyzing Cluster {clust}...")
-
-            cluster_df = df[df['cluster'] == clust]
-            cluster_df = cluster_df.dropna(subset=['T1_matrix', f'T{tp}_matrix'])
+            cluster_df = df[df['cluster'] == clust].dropna(subset=['T1_matrix', f'T{tp}_matrix'])
 
             if cluster_df.empty:
                 print(f" - No data for Cluster {clust}")
                 continue
 
-            t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in cluster_df['T1_matrix']]
-            t_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in cluster_df[f'T{tp}_matrix']]
+            t1_matrices = [m for m in cluster_df['T1_matrix']]
+            t_matrices = [m for m in cluster_df[f'T{tp}_matrix']]
+            roi_labels = t1_matrices[0].index if isinstance(t1_matrices[0], pd.DataFrame) else np.arange(379)
 
-            print(f"Cluster {clust} - Shape of T1 matrices: {np.shape(t1_matrices)}")
-            print(f"Cluster {clust} - Shape of T{tp} matrices: {np.shape(t_matrices)}")
-
-
-            # Get ROI labels from one valid matrix
-            first_valid = cluster_df['T1_matrix'].dropna().iloc[0]
-            roi_labels = first_valid.index if isinstance(first_valid, pd.DataFrame) else np.arange(379)
-
-            # Run stats
-            significant_matrix, p_vals_corrected, reject = analyze_matrices(t1_matrices, t_matrices, correction, alpha,
-                                                                            label=f"Cluster {clust}: T1 vs T{tp}")
-
-            # Convert outputs to DataFrames with labels
-            significant_matrix_df = pd.DataFrame(significant_matrix, index=roi_labels, columns=roi_labels)
-            p_vals_df = pd.DataFrame(p_vals_corrected, index=roi_labels, columns=roi_labels)
-            reject_df = pd.DataFrame(reject, index=roi_labels, columns=roi_labels)
-
+            sig_matrix, p_corr, reject = analyze_matrices(
+                t1_matrices, t_matrices,
+                correction=correction,
+                alpha=alpha,
+                label=f"Cluster {clust}: T1 vs T{tp}",
+                roi_labels=roi_labels,
+                matched=matched
+            )
 
             results[clust] = {
-            'significant_matrix': significant_matrix_df,
-            'p_corrected': p_vals_df,
-            'reject': reject_df
+                'significant_matrix': pd.DataFrame(sig_matrix, index=roi_labels, columns=roi_labels),
+                'p_corrected': pd.DataFrame(p_corr, index=roi_labels, columns=roi_labels),
+                'reject': pd.DataFrame(reject, index=roi_labels, columns=roi_labels)
             }
-
 
         return results
 
@@ -764,60 +848,85 @@ def load_roi_labels(filepath_csv):
     return roi_mapping
 
 
-def summarize_significant_differences(p_values_matrix, effect_size_matrix, roi_mapping, cluster_label=None, alpha=0.05):
+def summarize_significant_differences(p_values_matrix, 
+                                      sig_matrix, 
+                                      roi_labels, 
+                                      effect_size_matrix=None, 
+                                      cluster_label=None, 
+                                      alpha=0.05, 
+                                      filter_striatum=True):
     """
-    Summarize significant differences into a readable DataFrame.
-    
+    Summarize significant FC differences.
 
     Args:
-        p_values_matrix (np.array): Matrix of p-values ! But since we get dataframes after get_sig_matrix, wa have to use .values !!
-        effect_size_matrix (np.array): Matrix of effect sizes
-        roi_mapping (dict): Mapping ROI index -> region name
-        when using yeo, use this: roi_mapping_yeo = {i: label for i, label in enumerate(yeo_labels)}
-        cluster_label (int or None): Cluster index. If None, no cluster column is added.
-        alpha (float): Significance threshold after correction (default 0.05)
+        p_values_matrix (DataFrame or np.array): Matrix of p-values
+        sig_matrix (DataFrame or np.array): Binary matrix of significant entries (0/1)
+        roi_labels (list or dict): ROI names, e.g. list of strings or index-to-label dict, that has to correspond
+        to the case you're studying => eg labels returned from get_significant_matrix if contra_ipsi_split is True, and yeo labels if using yeo!
+        effect_size_matrix (optional): Matrix of effect sizes (same shape)
+        cluster_label (int or None): Optional cluster index
+        alpha (float): Significance threshold
+        filter_striatum (bool): Whether to keep only striatal ROI_1s
 
     Returns:
-        summary_df (pd.DataFrame): DataFrame of significant results
+        pd.DataFrame
     """
-    n_rois = p_values_matrix.shape[0]
-    rows = []
+    n = sig_matrix.shape[0]
+    summary = []
 
-    for i in range(n_rois):
-        for j in range(i + 1, n_rois):  # upper triangle only
-            p_val = p_values_matrix.iloc[i, j] if isinstance(p_values_matrix, pd.DataFrame) else p_values_matrix[i, j]
-            if p_val < alpha:
-                roi_1 = roi_mapping.get(i, f"ROI_{i}")
-                roi_2 = roi_mapping.get(j, f"ROI_{j}")
-                effect = effect_size_matrix.iloc[i, j] if isinstance(effect_size_matrix, pd.DataFrame) else effect_size_matrix[i, j]
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            sig = sig_matrix.iloc[i, j] if isinstance(sig_matrix, pd.DataFrame) else sig_matrix[i, j]
+            if sig:
+                p_val = p_values_matrix.iloc[i, j] if isinstance(p_values_matrix, pd.DataFrame) else p_values_matrix[i, j]
+                effect = None
+                if effect_size_matrix is not None:
+                    effect = effect_size_matrix.iloc[i, j] if isinstance(effect_size_matrix, pd.DataFrame) else effect_size_matrix[i, j]
+
+                # Labels
+                if isinstance(roi_labels, dict):
+                    roi_1 = roi_labels.get(i, f"ROI_{i}")
+                    roi_2 = roi_labels.get(j, f"ROI_{j}")
+                else:
+                    roi_1 = roi_labels[i]
+                    roi_2 = roi_labels[j]
+
                 entry = {
-                    'ROI_1': roi_1,
-                    'ROI_2': roi_2,
-                    'Comparison': f"{roi_1} - {roi_2}",
-                    'p_value': p_val,
-                    'effect_size': effect
+                    "ROI_1": roi_1,
+                    "ROI_2": roi_2,
+                    "Comparison": f"{roi_1} - {roi_2}",
+                    "p_value": p_val
                 }
-                if cluster_label is not None:
-                    entry['Cluster'] = cluster_label
-                rows.append(entry)
 
-    summary_df = pd.DataFrame(rows)
-    
-    if summary_df.empty:
+                if effect is not None:
+                    entry["effect_size"] = effect
+                if cluster_label is not None:
+                    entry["Cluster"] = cluster_label
+
+                summary.append(entry)
+
+    df = pd.DataFrame(summary)
+
+    if df.empty:
         return pd.DataFrame(columns=['ROI_1', 'ROI_2', 'Comparison', 'p_value', 'effect_size'])
 
+    # Filter by striatum if needed, so always except for yeo !!
+    if filter_striatum:
+        striatum_keywords = ['Caudate', 'Putamen', 'Pallidum', 'Accumbens']
+        matches = df['ROI_1'].astype(str).str.contains('|'.join(striatum_keywords), case=False, na=False)
+        df = df[matches].reset_index(drop=True)
 
-    # Put 'Cluster' first if it exists
-    if cluster_label is not None and not summary_df.empty:
-        cols = ['Cluster', 'ROI_1', 'ROI_2', 'Comparison', 'p_value', 'effect_size']
-        summary_df = summary_df[cols]
-    else:
-        cols = ['ROI_1', 'ROI_2', 'Comparison', 'p_value', 'effect_size']
-        summary_df = summary_df[cols]
 
-    summary_df = summary_df.sort_values(by='p_value', ascending=True).reset_index(drop=True)
+    # Reorder columns
+    core_cols = ['ROI_1', 'ROI_2', 'Comparison', 'p_value']
+    if 'effect_size' in df.columns:
+        core_cols.append('effect_size')
+    if 'Cluster' in df.columns:
+        core_cols = ['Cluster'] + core_cols
 
-    return summary_df
+    return df[core_cols].sort_values(by='p_value').reset_index(drop=True)
+
 
 def test_normality(df, alpha=0.05):
     """
