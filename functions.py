@@ -499,7 +499,9 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     return df_with_clusters, clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names
 
 
-# STATISTICAL TESTS
+############################################ STATISTICAL TESTS ############################################
+
+
 def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None, matched=False):
     if roi_labels is None:
         roi_labels = np.arange(t1_matrices[0].shape[0])
@@ -953,8 +955,6 @@ def test_normality(df, alpha=0.05):
 
     # Mark whether the variable is normally distributed
     shapiro_df['Normal? (p > 0.05)'] = shapiro_df['p-value'] > 0.05
-
-    print(shapiro_df)
     
     return shapiro_df
 
@@ -1068,6 +1068,9 @@ def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_
                 })
 
         return pd.DataFrame(results)
+
+
+############################################# YEO FUNCTIONS ################################
     
 
 def glasser_mapped_to_yeo(yeo_path):
@@ -1093,142 +1096,6 @@ def glasser_mapped_to_yeo(yeo_path):
     region_to_yeo['yeo_name'] = region_to_yeo['Yeo_Network'].map(yeo_label_map)
 
     return region_to_yeo
-'''
-def get_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
-    
-    matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    axes = axes.flatten()
-
-    for idx, timepoint in enumerate(matrix_columns):
-        valid_matrices = matrices[timepoint].dropna()
-
-        if len(valid_matrices) == 0:
-            axes[idx].axis('off')
-            axes[idx].set_title(f'No data for {timepoint}')
-            continue
-
-        # Compute FC matrices at the Yeo network level for all subjects
-        yeo_matrices = []
-
-        for mat in valid_matrices:
-            fc_matrix = mat.to_numpy()
-
-            # Optional: subset the matrix
-            if subset == True:
-                #fc_matrix = fc_matrix[rois, :][:, rois]
-                subset_map = region_to_yeo[region_to_yeo['Glasser_Index'].isin(rois)].copy()
-            else:
-                subset_map = region_to_yeo.copy()
-
-            # Remap Glasser indices to FC matrix local indices
-            index_map = {roi: i for i, roi in enumerate(rois)}
-            subset_map = subset_map[subset_map['Glasser_Index'].isin(index_map)]
-
-            # Group by Yeo network
-            network_to_indices = subset_map.groupby('Yeo_Network')['Glasser_Index'].apply(list).to_dict()
-            key_list = sorted(network_to_indices.keys())
-            key_to_idx = {k: i for i, k in enumerate(key_list)}
-            num_networks = len(key_list)
-
-            yeo_fc = np.zeros((num_networks, num_networks))
-
-            for i in key_list:
-                for j in key_list:
-                    idx_i = [index_map[g] for g in network_to_indices[i]]
-                    idx_j = [index_map[g] for g in network_to_indices[j]]
-                    submatrix = fc_matrix[np.ix_(idx_i, idx_j)]
-                    yeo_fc[key_to_idx[i], key_to_idx[j]] = submatrix.mean()
-
-            yeo_matrices.append(yeo_fc)
-
-        # Average across subjects
-        stacked = np.stack(yeo_matrices)
-        mean_yeo = np.nanmean(stacked, axis=0)
-
-        # Label axes
-        # Use the 'yeo_name' column from region_to_yeo for labels
-        yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
-        labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
-        
-        return mean_yeo, labels'''
-'''
-def plot_mean_yeo_matrices(matrices, region_to_yeo, rois, subset=False):
-    """
-    Plot the mean Yeo FC matrices in a 2x2 grid for T1 to T4 timepoints.
-
-    Args:
-        matrices (pd.DataFrame): DataFrame with subject FC matrices (T1_matrix to T4_matrix).
-        region_to_yeo (pd.DataFrame): Mapping of Glasser_Index to Yeo_Network.
-        rois (list or None): Optional list of ROI indices to restrict analysis to.
-        label_map (dict or None): Optional Yeo_Network label-to-name mapping.
-    """
-
-    matrix_columns = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    axes = axes.flatten()
-
-    for idx, timepoint in enumerate(matrix_columns):
-        valid_matrices = matrices[timepoint].dropna()
-
-        if len(valid_matrices) == 0:
-            axes[idx].axis('off')
-            axes[idx].set_title(f'No data for {timepoint}')
-            continue
-
-        # Compute FC matrices at the Yeo network level for all subjects
-        yeo_matrices = []
-
-        for mat in valid_matrices:
-            fc_matrix = mat.to_numpy()
-
-            # Optional: subset the matrix
-            if subset == True:
-                #fc_matrix = fc_matrix[rois, :][:, rois]
-                subset_map = region_to_yeo[region_to_yeo['Glasser_Index'].isin(rois)].copy()
-            else:
-                subset_map = region_to_yeo.copy()
-
-            # Remap Glasser indices to FC matrix local indices
-            index_map = {roi: i for i, roi in enumerate(rois)}
-            subset_map = subset_map[subset_map['Glasser_Index'].isin(index_map)]
-
-            # Group by Yeo network
-            network_to_indices = subset_map.groupby('Yeo_Network')['Glasser_Index'].apply(list).to_dict()
-            key_list = sorted(network_to_indices.keys())
-            key_to_idx = {k: i for i, k in enumerate(key_list)}
-            num_networks = len(key_list)
-
-            yeo_fc = np.zeros((num_networks, num_networks))
-
-            for i in key_list:
-                for j in key_list:
-                    idx_i = [index_map[g] for g in network_to_indices[i]]
-                    idx_j = [index_map[g] for g in network_to_indices[j]]
-                    submatrix = fc_matrix[np.ix_(idx_i, idx_j)]
-                    yeo_fc[key_to_idx[i], key_to_idx[j]] = submatrix.mean()
-
-            yeo_matrices.append(yeo_fc)
-
-        # Average across subjects
-        stacked = np.stack(yeo_matrices)
-        mean_yeo = np.nanmean(stacked, axis=0)
-
-        # Label axes
-        # Use the 'yeo_name' column from region_to_yeo for labels
-        yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
-        labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
-
-        sns.heatmap(mean_yeo, ax=axes[idx], cmap='coolwarm', annot=True, fmt=".2f",
-                    xticklabels=labels, yticklabels=labels)
-        axes[idx].set_title(f"Mean Yeo FC - {timepoint}")
-        axes[idx].set_xlabel("Yeo Network")
-        axes[idx].set_ylabel("Yeo Network")
-        axes[idx].tick_params(axis='x', rotation=45)
-
-    plt.tight_layout()
-    plt.show()
-'''
 
 
 
@@ -1334,3 +1201,7 @@ def plot_mean_yeo_matrices(all_yeo_matrices, labels):
 
     plt.tight_layout()
     plt.show()
+
+
+############################################## CORRELATIONS ##################################
+
