@@ -1445,7 +1445,6 @@ def motor_correlation(
 
     # Step 6: Visualization
     # Show only selected ROI rows but all columns
-    # Show only selected rows, all columns
     if selected_rois_labels is not None:
         matrix_to_plot = correlation_matrix.loc[selected_rois_labels, :]
         pvals_to_use = p_value_matrix.loc[selected_rois_labels, :]
