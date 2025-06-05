@@ -16,11 +16,17 @@ from sklearn.impute import SimpleImputer
 # for statistical tests
 from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
-from scipy.stats import shapiro
-from scipy.stats import wilcoxon
+from scipy.stats import shapiro, wilcoxon, pearsonr, spearmanr
+
 
 # for prettiness <3
 from tqdm import tqdm
+
+
+
+############################################## LOAD DATA FUNCTIONS #################################
+
+
 
 def load_excel_data(folder_path):
     # Load Excel files
@@ -34,8 +40,11 @@ def load_excel_data(folder_path):
     rsfMRI_full_info = rsfMRI_full_info.merge(subject_info, on="subject_full_id", how="left")
     rsfMRI_full_info = rsfMRI_full_info[['subject_full_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','Gender','Age','Education_level','Combined', 'Bilateral']]
     rsfMRI_full_info['subject_id'] = rsfMRI_full_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
+    regression_info['subject_id'] = regression_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
 
     return regression_info, rsfMRI_full_info
+
+
 
 def load_matrices(folder_path, rsfMRI_full_info, rois, request_type = 'all', plot = False):
     '''
@@ -176,7 +185,12 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, request_type = 'all', plo
     
     return df_rois, subjects, yeo_mat_all_rois, roi_mapping_yeo
 
-# plot the heatmap of the matrices
+
+
+############################################### PLOTTING FUNCTIONS #################################
+
+
+
 def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1_t3'):
     '''
     go through all the subjects and plot the matrices as sns heatmaps, with each row being a subject 
@@ -208,6 +222,7 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1
 
     plt.tight_layout()
     plt.show();
+   
     
 
 def plot_mean_FC_matrices(matrices, rois, subset=False):
@@ -257,12 +272,112 @@ def plot_mean_FC_matrices(matrices, rois, subset=False):
     plt.show()
 
     
+    
+############################################## UTILS FUNCTIONS #################################
+
+
+
 def flatten_upper(mat):
         mat = mat.values if isinstance(mat, pd.DataFrame) else mat  # ensure it's an array
         return mat[np.triu_indices_from(mat, k=1)]
 
 
-# ANCIENNE VERSION
+
+def create_roi_hemisphere_map(n_rois=379):
+    roi_to_hemi = {}
+    for roi in range(n_rois):
+        if roi < 180:
+            roi_to_hemi[roi] = 'L'
+        elif roi < 360:
+            roi_to_hemi[roi] = 'R'
+        elif 360 <= roi <= 367:
+            roi_to_hemi[roi] = 'L'  # Left subcortical
+        elif 368 <= roi <= 378:
+            roi_to_hemi[roi] = 'R'  # Right subcortical
+        elif roi == 378:
+            roi_to_hemi[roi] = 'None'  # Cerebellum (not lateralized)
+        else:
+            roi_to_hemi[roi] = 'Cerebellum'  # Cerebellum (not lateralized)
+    return roi_to_hemi
+
+
+
+def reorient_t1_t(df, selected_rois, roi_mapping, tp = 3):
+
+    hemi_map = create_roi_hemisphere_map()
+    left_rois = [r for r in selected_rois if hemi_map[r] == 'L']
+    right_rois = [r for r in selected_rois if hemi_map[r] == 'R']
+
+    aligned_t1 = []
+    aligned_t = []
+    new_labels = None
+
+    for _, row in df.iterrows():
+        mat1 = row['T1_matrix']
+        mat = row[f'T{tp}_matrix']
+        lesion = row['Lesion_side']
+        if mat1 is None or mat is None or lesion not in ['L', 'R']:
+            continue
+
+        if lesion == 'L':
+            ipsi = left_rois
+            contra = right_rois
+        else:
+            ipsi = right_rois
+            contra = left_rois
+
+        roi_order = ipsi + contra
+        
+        # Cleaned labels directly, no nested reprocessing
+        clean = lambda x: x.replace('L_', '').replace('R_', '').replace('_L', '').replace('_R', '')
+        cleaned_ipsi_labels = [roi_mapping[r].replace('L_', '').replace('R_', '') + '_ipsi' for r in ipsi]
+        cleaned_contra_labels = [roi_mapping[r].replace('L_', '').replace('R_', '') + '_contra' for r in contra]
+        cleaned_ipsi_labels = [clean(label) for label in cleaned_ipsi_labels]
+        cleaned_contra_labels = [clean(label) for label in cleaned_contra_labels]
+        new_labels = cleaned_ipsi_labels + cleaned_contra_labels
+
+        #new_labels = [f"{roi_mapping[r]}_ipsi" for r in ipsi] + [f"{roi_mapping[r]}_contra" for r in contra]
+        
+        #new_labels = [new_labels[r].replace('L_', '').replace('R_', '') for r in ipsi] + \
+        #     [new_labels[r].replace('L_', '').replace('R_', '') for r in contra]
+
+
+        mat1_re = mat1.loc[roi_order, roi_order]
+        mat_re = mat.loc[roi_order, roi_order]
+        mat1_re.index = mat1_re.columns = new_labels
+        mat_re.index = mat_re.columns = new_labels
+
+        aligned_t1.append(mat1_re)
+        aligned_t.append(mat_re)
+
+    return aligned_t1, aligned_t, new_labels
+
+
+
+def dict_of_lists_to_dataframe(data_dict):
+    """
+    Convert a dictionary of lists to a DataFrame, padding shorter lists with None.
+    Because Yeo matrices aren't sorted by subject, and the missing matrices were considered "Missing Values", and therefore 
+    we cannot convert them to a DataFrame directly, which we want for further analysis (but we don't need the subjects).
+    """
+    # Find the maximum list length
+    max_len = max(len(v) for v in data_dict.values())
+
+    # Pad each list to the same length using None
+    padded_dict = {
+        k: v + [None] * (max_len - len(v))
+        for k, v in data_dict.items()
+    }
+
+    return pd.DataFrame(padded_dict)
+
+
+
+############################################# CLUSTERING FUNCTIONS #################################
+
+
+
+# old version
 def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clusters = 2, plot = True):
     ''' 
     uses Kmeans clustering to cluster the patients based on their T1 matrices and other features.
@@ -331,7 +446,8 @@ def cluster_and_plot(matrices, numerical_cols_names, categorical_cols_name, clus
     
     return matrices_with_clusters
 
-# CLUSTERING FUNCTIONS
+
+
 def compute_feature_importance(features, clusters, feature_names, top_features=10, plot=True):
     """
     Compute feature importance by comparing mean feature values across clusters.
@@ -369,6 +485,7 @@ def compute_feature_importance(features, clusters, feature_names, top_features=1
     return importance
 
 
+
 def flatten_selected_rois(fc_matrix, selected_rois_labels):
     """
     Flatten connectivities from selected ROIs by label (not by index).
@@ -383,6 +500,7 @@ def flatten_selected_rois(fc_matrix, selected_rois_labels):
         connections = connections.drop(labels=src_label, errors='ignore')  # enlever self-connection
         flattened.append(connections.values)
     return np.concatenate(flattened)
+
 
 
 def generate_feature_names(selected_rois_labels, all_roi_labels, numerical_cols, categorical_cols, ohe):
@@ -413,6 +531,7 @@ def generate_feature_names(selected_rois_labels, all_roi_labels, numerical_cols,
 
     feature_names = roi_connection_names + numerical_names + categorical_names
     return feature_names
+
 
 
 def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numerical_cols=None, categorical_cols=None, n_components=20, max_clusters=10, random_state=42):
@@ -499,7 +618,9 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
     return df_with_clusters, clusters, silhouette_scores, pca_features, scaler, pca, all_features, feature_names
 
 
+
 ############################################ STATISTICAL TESTS ############################################
+
 
 
 def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None, matched=False):
@@ -567,96 +688,6 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
 
 
 
-def create_roi_hemisphere_map(n_rois=379):
-    roi_to_hemi = {}
-    for roi in range(n_rois):
-        if roi < 180:
-            roi_to_hemi[roi] = 'L'
-        elif roi < 360:
-            roi_to_hemi[roi] = 'R'
-        elif 360 <= roi <= 367:
-            roi_to_hemi[roi] = 'L'  # Left subcortical
-        elif 368 <= roi <= 378:
-            roi_to_hemi[roi] = 'R'  # Right subcortical
-        elif roi == 378:
-            roi_to_hemi[roi] = 'None'  # Cerebellum (not lateralized)
-        else:
-            roi_to_hemi[roi] = 'Cerebellum'  # Cerebellum (not lateralized)
-    return roi_to_hemi
-
-
-
-def reorient_t1_t3(df, selected_rois, roi_mapping, tp = 3):
-
-    hemi_map = create_roi_hemisphere_map()
-    left_rois = [r for r in selected_rois if hemi_map[r] == 'L']
-    right_rois = [r for r in selected_rois if hemi_map[r] == 'R']
-
-    aligned_t1 = []
-    aligned_t = []
-    new_labels = None
-
-    for _, row in df.iterrows():
-        mat1 = row['T1_matrix']
-        mat = row[f'T{tp}_matrix']
-        lesion = row['Lesion_side']
-        if mat1 is None or mat is None or lesion not in ['L', 'R']:
-            continue
-
-        if lesion == 'L':
-            ipsi = left_rois
-            contra = right_rois
-        else:
-            ipsi = right_rois
-            contra = left_rois
-
-        roi_order = ipsi + contra
-        
-        # Cleaned labels directly, no nested reprocessing
-        clean = lambda x: x.replace('L_', '').replace('R_', '').replace('_L', '').replace('_R', '')
-        cleaned_ipsi_labels = [roi_mapping[r].replace('L_', '').replace('R_', '') + '_ipsi' for r in ipsi]
-        cleaned_contra_labels = [roi_mapping[r].replace('L_', '').replace('R_', '') + '_contra' for r in contra]
-        cleaned_ipsi_labels = [clean(label) for label in cleaned_ipsi_labels]
-        cleaned_contra_labels = [clean(label) for label in cleaned_contra_labels]
-        new_labels = cleaned_ipsi_labels + cleaned_contra_labels
-
-        #new_labels = [f"{roi_mapping[r]}_ipsi" for r in ipsi] + [f"{roi_mapping[r]}_contra" for r in contra]
-        
-        #new_labels = [new_labels[r].replace('L_', '').replace('R_', '') for r in ipsi] + \
-        #     [new_labels[r].replace('L_', '').replace('R_', '') for r in contra]
-
-
-        mat1_re = mat1.loc[roi_order, roi_order]
-        mat_re = mat.loc[roi_order, roi_order]
-        mat1_re.index = mat1_re.columns = new_labels
-        mat_re.index = mat_re.columns = new_labels
-
-        aligned_t1.append(mat1_re)
-        aligned_t.append(mat_re)
-
-    return aligned_t1, aligned_t, new_labels
-
-
-
-def dict_of_lists_to_dataframe(data_dict):
-    """
-    Convert a dictionary of lists to a DataFrame, padding shorter lists with None.
-    Because Yeo matrices aren't sorted by subject, and the missing matrices were considered "Missing Values", and therefore 
-    we cannot convert them to a DataFrame directly, which we want for further analysis (but we don't need the subjects).
-    """
-    # Find the maximum list length
-    max_len = max(len(v) for v in data_dict.values())
-
-    # Pad each list to the same length using None
-    padded_dict = {
-        k: v + [None] * (max_len - len(v))
-        for k, v in data_dict.items()
-    }
-
-    return pd.DataFrame(padded_dict)
-
-
-
 def test_fc_differences_normality(df, tp=3):
     """
     Test normality (Shapiro-Wilk) of FC differences (T{tp} - T1) for each ROI pair in selected ROIs.
@@ -719,7 +750,7 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
             raise ValueError("Must provide `selected_rois` and `roi_mapping` for contra_ipsi_split.")
 
         # Reorient matrices into standardized ipsi/contra format
-        t1_matrices, t_matrices, aligned_labels = reorient_t1_t3(df, selected_rois, roi_mapping, tp=tp)
+        t1_matrices, t_matrices, aligned_labels = reorient_t1_t(df, selected_rois, roi_mapping, tp=tp)
 
         if not t1_matrices or not t_matrices:
             raise ValueError("No valid T1 or T{tp} matrices available after reorientation.")
@@ -802,6 +833,7 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
         return results
 
     
+    
 def compute_FC_diff(df, rois, tp=3):
     # Extract T1 and T4 matrices
     t1_matrices = [matrix.values if isinstance(matrix, pd.DataFrame) else matrix for matrix in df['T1_matrix']]
@@ -824,6 +856,8 @@ def compute_FC_diff(df, rois, tp=3):
     plt.show();
 
     return diff_array
+
+
 
 # SUMMARY OF T TESTS
 def load_roi_labels(filepath_csv):
@@ -848,6 +882,7 @@ def load_roi_labels(filepath_csv):
     roi_mapping = {row['# ID'] - 1: row['RegionLongName'] for _, row in roi_df.iterrows()}
 
     return roi_mapping
+
 
 
 def summarize_significant_differences(p_values_matrix, 
@@ -930,6 +965,7 @@ def summarize_significant_differences(p_values_matrix,
     return df[core_cols].sort_values(by='p_value').reset_index(drop=True)
 
 
+
 def test_normality(df, alpha=0.05):
     """
     Perform Shapiro-Wilk test for normality on the data.
@@ -957,6 +993,8 @@ def test_normality(df, alpha=0.05):
     shapiro_df['Normal? (p > 0.05)'] = shapiro_df['p-value'] > 0.05
     
     return shapiro_df
+
+
 
 def motor_longitudinal(regression_info, tp =3, start_col='FAB_abstraction', end_col='nmf_motor', split_L_R = False):
     """
@@ -1203,5 +1241,279 @@ def plot_mean_yeo_matrices(all_yeo_matrices, labels):
     plt.show()
 
 
+
 ############################################## CORRELATIONS ##################################
 
+
+
+'''
+def motor_correlation(
+    df,
+    regression_info,
+    tp=3,
+    motor_test='nmf_motor',
+    corr_type='pearsonr',
+    selected_rois_labels=None,
+    mask_significant_only=True
+):
+    # Step 1: Filter rows with valid T1_matrix
+    valid_data = df[df["T1_matrix"].apply(lambda x: isinstance(x, pd.DataFrame))].copy()
+    if valid_data.empty:
+        print("No valid FC matrices found.")
+        return None, None
+
+    # Step 2: Get ROI labels from one matrix
+    roi_labels = valid_data["T1_matrix"].iloc[0].index.tolist()
+
+    # Step 3: Prepare output matrices
+    correlation_matrix = pd.DataFrame(index=roi_labels, columns=roi_labels, dtype=float)
+    p_value_matrix = pd.DataFrame(index=roi_labels, columns=roi_labels, dtype=float)
+
+    # Step 4: Merge with behavioral data
+    regression_t = regression_info[
+        (regression_info["TimePoint"] == f"T{tp}") &
+        (regression_info["Behavioral_assessment"] == 1) &
+        (regression_info["MRI"] == 1)
+    ].copy()
+
+    if motor_test not in regression_t.columns:
+        print(f"Motor test '{motor_test}' not found.")
+        return None, None
+
+    valid_data = valid_data.merge(
+        regression_t[["subject_id", motor_test]],
+        on="subject_id"
+    )
+
+    if valid_data.empty:
+        print("No data after merging with behavioral scores.")
+        return None, None
+
+    motor_scores = valid_data[motor_test].values
+
+    # Step 5: Correlation computation
+    for i in roi_labels:
+        for j in roi_labels:
+            fc_values = valid_data["T1_matrix"].apply(lambda mat: mat.loc[i, j]).values
+            # Drop NaNs
+            stack = np.stack([fc_values, motor_scores], axis=1)
+            valid = ~np.isnan(stack).any(axis=1)
+            if valid.sum() >= 3:
+                if corr_type == "pearsonr":
+                    r, p = pearsonr(fc_values[valid], motor_scores[valid])
+                elif corr_type == "spearmanr":
+                    r, p = spearmanr(fc_values[valid], motor_scores[valid])
+                else:
+                    raise ValueError(f"Invalid correlation type: {corr_type}")
+            else:
+                r, p = np.nan, np.nan
+            correlation_matrix.loc[i, j] = r
+            p_value_matrix.loc[i, j] = p
+
+    # Step 6: Filter + Visualize selected ROIs if specified
+    if selected_rois_labels is not None:
+        corr_selected = correlation_matrix.loc[selected_rois_labels, :]
+        p_val_selected = p_value_matrix.loc[selected_rois_labels, :]
+
+        if mask_significant_only:
+            corr_selected = corr_selected.where(p_val_selected < 0.05)
+
+        plt.figure(figsize=(8, 4))
+        sns.heatmap(
+            corr_selected.astype(float),
+            cmap="coolwarm",
+            center=0,
+            xticklabels=[col + 1 for col in corr_selected.columns],
+            yticklabels=[roi + 1 for roi in selected_rois_labels]
+        )
+        plt.title(f"{corr_type.capitalize()} correlation: FC (T1, selected ROIs) vs {motor_test} at T{tp}")
+        plt.xlabel("ROI")
+        plt.ylabel("Striatal ROI")
+        plt.tight_layout()
+        plt.show()
+    else:
+        # Full matrix heatmap
+        plt.figure(figsize=(7, 5))
+        sns.heatmap(
+            correlation_matrix.astype(float),
+            cmap="coolwarm",
+            center=0,
+            xticklabels=roi_labels,
+            yticklabels=roi_labels
+        )
+        plt.title(f"{corr_type.capitalize()} correlation: FC (T1) vs {motor_test} at T{tp}")
+        plt.xlabel("ROI")
+        plt.ylabel("ROI")
+        plt.tight_layout()
+        plt.show()
+
+    return correlation_matrix, p_value_matrix'''
+
+
+
+# WORKS FOR IPSI CONTRA SPLIT, BUT NOT FOR YEOMATRIX
+def motor_correlation(
+    df,
+    regression_info,
+    tp=3,
+    motor_test='nmf_motor',
+    corr_type='pearsonr',
+    selected_rois_labels=None,
+    mask_significant_only=True
+                                ):
+    """
+    Compute correlation between FC matrices and motor scores at a given timepoint.
+    Args:
+        df (pd.DataFrame): DataFrame with 'T1_matrix' and f'T{tp}_matrix' columns containing FC matrices.
+        regression_info (pd.DataFrame): DataFrame with behavioral scores and metadata.
+        tp (int): Timepoint to compare with T1 (default: 3 → T3).
+        motor_test (str): Column name for the motor test scores in regression_info.
+        corr_type (str): Type of correlation to compute ('pearsonr' or 'spearmanr').
+        selected_rois_labels (list, optional): List of ROI labels to visualize. If None, all ROIs are used.
+        mask_significant_only (bool): If True, mask non-significant correlations in the heatmap.
+    
+    Nota Bene:
+        If we want to use this function with a contra/ipsilesional split, we first need to use: 
+        df, regression_info = switch_contra_ipsi_df(df, regression info, tp, rois, roi_mapping) !
+    """
+    
+    # Step 1: Filter valid rows with DataFrame FCs
+    valid_data = df[df["T1_matrix"].apply(lambda x: isinstance(x, pd.DataFrame))].copy()
+    if valid_data.empty:
+        print("No valid FC matrices found.")
+        return None, None
+
+    # Step 2: Get common ROI labels across all subjects
+    common_labels = set(valid_data["T1_matrix"].iloc[0].index)
+    for mat in valid_data["T1_matrix"]:
+        common_labels &= set(mat.index)
+
+    if not common_labels:
+        print("No overlapping ROI labels across subjects.")
+        return None, None
+    
+    # Final list of labels to work with (for correlation computation, use all)
+    roi_labels = sorted(common_labels)
+
+    # Step 3: Prepare correlation and p-value matrices
+    correlation_matrix = pd.DataFrame(index=roi_labels, columns=roi_labels, dtype=float)
+    p_value_matrix = pd.DataFrame(index=roi_labels, columns=roi_labels, dtype=float)
+
+    # Step 4: Merge with motor scores
+    regression_t = regression_info[
+        (regression_info["TimePoint"] == f"T{tp}") &
+        (regression_info["Behavioral_assessment"] == 1) &
+        (regression_info["MRI"] == 1)
+    ].copy()
+
+    if motor_test not in regression_t.columns:
+        print(f"Motor test '{motor_test}' not found.")
+        return None, None
+
+    valid_data = valid_data.merge(
+        regression_t[["subject_id", motor_test]],
+        on="subject_id"
+    )
+
+    if valid_data.empty:
+        print("No data after merging with behavioral scores.")
+        return None, None
+
+    motor_scores = valid_data[motor_test].values
+
+    # Step 5: Loop through ROI pairs
+    for i in roi_labels:
+        for j in roi_labels:
+            # Safely extract values, even if ROI missing in a subject
+            fc_values = valid_data["T1_matrix"].apply(
+                lambda mat: mat.loc[i, j] if i in mat.index and j in mat.columns else np.nan
+            ).values
+
+            valid = ~np.isnan(fc_values) & ~np.isnan(motor_scores)
+            if valid.sum() >= 3:
+                if corr_type == "pearsonr":
+                    r, p = pearsonr(fc_values[valid], motor_scores[valid])
+                elif corr_type == "spearmanr":
+                    r, p = spearmanr(fc_values[valid], motor_scores[valid])
+                else:
+                    raise ValueError(f"Invalid correlation type: {corr_type}")
+            else:
+                r, p = np.nan, np.nan
+
+            correlation_matrix.loc[i, j] = r
+            p_value_matrix.loc[i, j] = p
+
+    # Step 6: Visualization
+    # Show only selected ROI rows but all columns
+    # Show only selected rows, all columns
+    if selected_rois_labels is not None:
+        matrix_to_plot = correlation_matrix.loc[selected_rois_labels, :]
+        pvals_to_use = p_value_matrix.loc[selected_rois_labels, :]
+        if mask_significant_only:
+            matrix_to_plot = matrix_to_plot.where(pvals_to_use < 0.05)
+    else:
+        matrix_to_plot = correlation_matrix.copy()
+        if mask_significant_only:
+            matrix_to_plot = matrix_to_plot.where(p_value_matrix < 0.05)
+
+
+
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(
+        matrix_to_plot.astype(float),
+        cmap="coolwarm",
+        center=0,
+        xticklabels=True,
+        yticklabels=True
+    )
+    plt.title(f"{corr_type.capitalize()} correlation: FC (T1) vs {motor_test} at T{tp}")
+    plt.xlabel("ROI")
+    plt.ylabel("ROI")
+    plt.tight_layout()
+    plt.show()
+
+    return correlation_matrix, p_value_matrix
+
+
+
+def assign_fugl_ipsi_contra(row):
+    if row["Lesion_side"] == "L":
+        return pd.Series({
+            "Fugl_Meyer_ipsi": row["Fugl_Meyer_left_TOTAL"],
+            "Fugl_Meyer_contra": row["Fugl_Meyer_right_TOTAL"]
+        })
+    elif row["Lesion_side"] == "R":
+        return pd.Series({
+            "Fugl_Meyer_ipsi": row["Fugl_Meyer_right_TOTAL"],
+            "Fugl_Meyer_contra": row["Fugl_Meyer_left_TOTAL"]
+        })
+    else:
+        return pd.Series({
+            "Fugl_Meyer_ipsi": np.nan,
+            "Fugl_Meyer_contra": np.nan
+        })
+
+
+
+def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None):
+    regression_info[["Fugl_Meyer_ipsi", "Fugl_Meyer_contra"]] = regression_info.apply(assign_fugl_ipsi_contra, axis=1)
+    matrices_contra_ipsi, _, roi_labels = reorient_t1_t(df, rois, roi_mapping=roi_mapping, tp=3)
+
+    # Match valid subjects (same number as aligned_t1)
+    valid_subject_ids = []
+
+    for i, row in df.iterrows():
+        mat1 = row['T1_matrix']
+        mat = row[f'T{tp}_matrix']  # or whatever T you chose
+        lesion = row['Lesion_side']
+        if mat1 is None or mat is None or lesion not in ['L', 'R']:
+            continue
+        valid_subject_ids.append(row['subject_id'])
+
+    # Now create a new DataFrame
+    df_aligned = pd.DataFrame({
+        "subject_id": valid_subject_ids,
+        "T1_matrix": matrices_contra_ipsi  # reoriented FC matrices
+    })
+    
+    return df_aligned, regression_info
