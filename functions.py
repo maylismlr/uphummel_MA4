@@ -400,6 +400,23 @@ def fisher_z_transform(matrix):
 
 
 
+def split_by_lesion_side(df):
+    """
+    Splits the input DataFrame into two DataFrames based on the Lesion_side column.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame with a 'Lesion_side' column.
+    
+    Returns:
+        df_L (pd.DataFrame): Subjects with left-hemisphere lesions ('L').
+        df_R (pd.DataFrame): Subjects with right-hemisphere lesions ('R').
+    """
+    df_L = df[df['Lesion_side'] == 'L'].copy()
+    df_R = df[df['Lesion_side'] == 'R'].copy()
+    return df_L, df_R
+
+
+
 ############################################# CLUSTERING FUNCTIONS #################################
 
 
@@ -650,7 +667,7 @@ def cluster_subjects(df, selected_rois_labels, matrix_column='T1_matrix', numeri
 
 
 
-def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None, matched=False):
+def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_labels=None, matched=False, test = 'ttest_rel'):
     if roi_labels is None:
         roi_labels = np.arange(t1_matrices[0].shape[0])
 
@@ -669,9 +686,12 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
                 t_values = np.array([mat[i, j] for mat in t_matrices])
 
             if matched:
-                stat, p = ttest_rel(t1_values, t_values, nan_policy='omit')
+                if test == 'ttest_rel':
+                    stat, p = ttest_rel(t1_values, t_values, nan_policy='omit')
+                elif test == 'wilcoxon':
+                    stat, p = wilcoxon(t1_values, t_values, alternative='two-sided', nan_policy='omit')
             else:
-                stat, p = ttest_ind(t1_values, t_values, equal_var=True, nan_policy='omit')
+                    stat, p = ttest_ind(t1_values, t_values, equal_var=True, nan_policy='omit')
 
             t_stat[i, j] = stat
             p_val[i, j] = p
@@ -772,7 +792,7 @@ def test_fc_differences_normality(df, tp=3):
 
 
 
-def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched=False, roi_labels=None, contra_ipsi_split=False, selected_rois=None, roi_mapping=None):
+def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched=False, roi_labels=None, contra_ipsi_split=False, selected_rois=None, roi_mapping=None, test = "ttest_rel"):
     '''
     Computes the significance matrix for T1 vs T{tp} matrices.
     Supports clustering and contra/ipsi standardization.
@@ -811,7 +831,8 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
             alpha=alpha,
             label=f"Ipsi vs Contra FC (T1 vs T{tp})",
             roi_labels=aligned_labels,
-            matched=matched
+            matched=matched, 
+            test = test
         )
 
         return pd.DataFrame(sig_matrix, index=aligned_labels, columns=aligned_labels), \
@@ -843,7 +864,8 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
             alpha=alpha,
             label=f"T1 vs T{tp}",
             roi_labels=roi_labels,
-            matched=matched
+            matched=matched,
+            test=test
         )
 
         return pd.DataFrame(sig_matrix, index=roi_labels, columns=roi_labels), \
@@ -871,7 +893,8 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
                 alpha=alpha,
                 label=f"Cluster {clust}: T1 vs T{tp}",
                 roi_labels=roi_labels,
-                matched=matched
+                matched=matched,
+                test= test
             )
 
             results[clust] = {
@@ -1402,6 +1425,7 @@ def motor_correlation(
 
 
 # WORKS FOR IPSI CONTRA SPLIT, BUT NOT FOR YEOMATRIX
+
 def motor_correlation(
     df,
     regression_info,
@@ -1410,28 +1434,22 @@ def motor_correlation(
     corr_type='pearsonr',
     selected_rois_labels=None,
     mask_significant_only=True
-                                ):
+):
     """
-    Compute correlation between FC matrices and motor scores at a given timepoint.
-    Args:
-        df (pd.DataFrame): DataFrame with 'T1_matrix' and f'T{tp}_matrix' columns containing FC matrices.
-        regression_info (pd.DataFrame): DataFrame with behavioral scores and metadata.
-        tp (int): Timepoint to compare with T1 (default: 3 → T3).
-        motor_test (str): Column name for the motor test scores in regression_info.
-        corr_type (str): Type of correlation to compute ('pearsonr' or 'spearmanr').
-        selected_rois_labels (list, optional): List of ROI labels to visualize. If None, all ROIs are used.
-        mask_significant_only (bool): If True, mask non-significant correlations in the heatmap.
-    
-    Nota Bene:
-        If we want to use this function with a contra/ipsilesional split, we first need to use: 
-        df, regression_info = switch_contra_ipsi_df(df, regression info, tp, rois, roi_mapping) !
+    Compute correlation between FC matrices and motor scores at a given timepoint,
+    with optional FDR correction and selective ROI plotting.
+
+    Returns:
+        correlation_matrix (DataFrame): full matrix of correlation coefficients
+        p_value_matrix (DataFrame): raw (uncorrected) p-values
+        pval_corrected_matrix (DataFrame): FDR-corrected p-values
     """
-    
+
     # Step 1: Filter valid rows with DataFrame FCs
     valid_data = df[df["T1_matrix"].apply(lambda x: isinstance(x, pd.DataFrame))].copy()
     if valid_data.empty:
         print("No valid FC matrices found.")
-        return None, None
+        return None, None, None
 
     # Step 2: Get common ROI labels across all subjects
     common_labels = set(valid_data["T1_matrix"].iloc[0].index)
@@ -1440,9 +1458,9 @@ def motor_correlation(
 
     if not common_labels:
         print("No overlapping ROI labels across subjects.")
-        return None, None
-    
-    # Final list of labels to work with (for correlation computation, use all)
+        return None, None, None
+
+    # Final list of labels to work with (correlation on full matrix)
     roi_labels = sorted(common_labels)
 
     # Step 3: Prepare correlation and p-value matrices
@@ -1458,7 +1476,7 @@ def motor_correlation(
 
     if motor_test not in regression_t.columns:
         print(f"Motor test '{motor_test}' not found.")
-        return None, None
+        return None, None, None
 
     valid_data = valid_data.merge(
         regression_t[["subject_id", motor_test]],
@@ -1467,14 +1485,13 @@ def motor_correlation(
 
     if valid_data.empty:
         print("No data after merging with behavioral scores.")
-        return None, None
+        return None, None, None
 
     motor_scores = valid_data[motor_test].values
 
     # Step 5: Loop through ROI pairs
     for i in roi_labels:
         for j in roi_labels:
-            # Safely extract values, even if ROI missing in a subject
             fc_values = valid_data["T1_matrix"].apply(
                 lambda mat: mat.loc[i, j] if i in mat.index and j in mat.columns else np.nan
             ).values
@@ -1493,19 +1510,30 @@ def motor_correlation(
             correlation_matrix.loc[i, j] = r
             p_value_matrix.loc[i, j] = p
 
+    # Step 5.5: Apply FDR correction
+    pval_array = p_value_matrix.values.flatten()
+    valid_mask = ~np.isnan(pval_array)
+
+    pvals_to_correct = pval_array[valid_mask]
+    _, pvals_corrected, _, _ = multipletests(pvals_to_correct, alpha=0.05, method='fdr_bh')
+
+    pval_corrected_matrix = pd.DataFrame(
+        data=np.full_like(p_value_matrix.values, np.nan, dtype=float),
+        index=p_value_matrix.index,
+        columns=p_value_matrix.columns
+    )
+    pval_corrected_matrix.values.flat[valid_mask] = pvals_corrected
+
     # Step 6: Visualization
-    # Show only selected ROI rows but all columns
     if selected_rois_labels is not None:
         matrix_to_plot = correlation_matrix.loc[selected_rois_labels, :]
-        pvals_to_use = p_value_matrix.loc[selected_rois_labels, :]
+        pvals_to_use = pval_corrected_matrix.loc[selected_rois_labels, :]
         if mask_significant_only:
             matrix_to_plot = matrix_to_plot.where(pvals_to_use < 0.05)
     else:
         matrix_to_plot = correlation_matrix.copy()
         if mask_significant_only:
-            matrix_to_plot = matrix_to_plot.where(p_value_matrix < 0.05)
-
-
+            matrix_to_plot = matrix_to_plot.where(pval_corrected_matrix < 0.05)
 
     plt.figure(figsize=(12, 8))
     sns.heatmap(
@@ -1513,15 +1541,19 @@ def motor_correlation(
         cmap="coolwarm",
         center=0,
         xticklabels=True,
-        yticklabels=True
+        yticklabels=True,
+        vmin=-1,
+        vmax=1,
+        annot=True,
     )
-    plt.title(f"{corr_type.capitalize()} correlation: FC (T1) vs {motor_test} at T{tp}")
+    plt.title(f"{corr_type.capitalize()} correlation (FDR-corrected p<0.05): FC (T1) vs {motor_test} at T{tp}")
     plt.xlabel("ROI")
     plt.ylabel("ROI")
     plt.tight_layout()
     plt.show()
 
-    return correlation_matrix, p_value_matrix
+    return correlation_matrix, p_value_matrix, pval_corrected_matrix
+
 
 
 
