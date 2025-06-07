@@ -46,7 +46,7 @@ def load_excel_data(folder_path):
 
 
 
-def load_matrices(folder_path, rsfMRI_full_info, rois, request_type = 'all', plot = False):
+def load_matrices(folder_path, rsfMRI_full_info, rois, request_type = 'all', plot = False, transform = True):
     '''
     Load data from .mat files in the specified folder. Either get all matrices (enter request_type = 'all'), 
     or only T1 matrices (enter request_type = 't1_only'), or only T1 and T3 matrices matched (enter request_type = 't1_t3_matched),
@@ -85,6 +85,10 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, request_type = 'all', plo
             matrix = pd.DataFrame(mat_data['CM']).iloc[rois_full, rois_full]
             
             matrix = matrix.replace('None', np.nan)
+            
+            if transform:
+                # Apply Fisher Z-transform if needed
+                matrix = fisher_z_transform(matrix)
 
             if 'T1' in mat_file:
                 t1_matrix = matrix
@@ -214,7 +218,7 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1
             ax = axes[i, j] if num_subjects > 1 else axes[j]
             if timepoint in subject_matrices.columns:
                 matrix = subject_matrices.loc[subject, timepoint]
-                sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False, vmin=0, vmax=1, xticklabels=rois, yticklabels=rois)
+                sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False, vmin=-1, vmax=1, xticklabels=rois, yticklabels=rois)
                 ax.set_title(f'Subject {subject} - {timepoint}')
             else:
                 ax.axis('off')  # Hide axes if timepoint is not available
@@ -257,7 +261,7 @@ def plot_mean_FC_matrices(matrices, rois, subset=False):
             tick_positions = [0, len(rois) // 2, len(rois) - 1]
             tick_labels = [str(pos) for pos in tick_positions]
 
-        sns.heatmap(mean_matrix, ax=axes[i], cmap='viridis', cbar=True)
+        sns.heatmap(mean_matrix, ax=axes[i], cmap='viridis', cbar=True, vmin=-1, vmax=1)
         axes[i].set_xticks(tick_positions)
         axes[i].set_yticks(tick_positions)
         axes[i].set_xticklabels(tick_labels)
@@ -342,13 +346,24 @@ def reorient_t1_t(df, selected_rois, roi_mapping, tp = 3):
         #     [new_labels[r].replace('L_', '').replace('R_', '') for r in contra]
 
 
-        mat1_re = mat1.loc[roi_order, roi_order]
-        mat_re = mat.loc[roi_order, roi_order]
+        mat1_re = mat1.loc[roi_order, roi_order].astype(float)
+        mat_re = mat.loc[roi_order, roi_order].astype(float)
+
+        # Replace inf/-inf with np.nan
+        mat1_re.replace([np.inf, -np.inf], np.nan, inplace=True)
+        mat_re.replace([np.inf, -np.inf], np.nan, inplace=True)
+
         mat1_re.index = mat1_re.columns = new_labels
         mat_re.index = mat_re.columns = new_labels
 
         aligned_t1.append(mat1_re)
         aligned_t.append(mat_re)
+        
+        #print("Matrix shape:", mat1_re.shape)
+        #print("Number of NaNs in mat1:", mat1_re.isna().sum().sum())
+        #print("Number of NaNs in mat :", mat_re.isna().sum().sum())
+        #print("Number of aligned subjects:", len(aligned_t1))
+
 
     return aligned_t1, aligned_t, new_labels
 
@@ -370,6 +385,18 @@ def dict_of_lists_to_dataframe(data_dict):
     }
 
     return pd.DataFrame(padded_dict)
+
+
+def fisher_z_transform(matrix):
+    """
+    Apply Fisher Z-transformation to a correlation matrix.
+    Ignores NaNs and preserves matrix shape.
+    """
+    if matrix is None:
+        return None
+    with np.errstate(divide='ignore', invalid='ignore'):
+        z_matrix = 0.5 * np.log((1 + matrix) / (1 - matrix))
+    return z_matrix
 
 
 
@@ -652,7 +679,15 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
     # FDR correction
     p_val_flat = p_val.ravel()
     if correction:
-        reject, p_vals_corrected, _, _ = multipletests(p_val_flat, alpha=alpha, method='fdr_bh')
+        valid_mask = ~np.isnan(p_val_flat)
+        p_vals_corrected = np.full_like(p_val_flat, np.nan, dtype=float)
+        reject = np.full_like(p_val_flat, False, dtype=bool)
+
+        if np.any(valid_mask):
+            reject_valid, p_corr_valid, _, _ = multipletests(p_val_flat[valid_mask], alpha=alpha, method='fdr_bh')
+            p_vals_corrected[valid_mask] = p_corr_valid
+            reject[valid_mask] = reject_valid
+
     else:
         p_vals_corrected = p_val_flat
         reject = np.zeros_like(p_val_flat, dtype=bool)
@@ -741,6 +776,20 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
     '''
     Computes the significance matrix for T1 vs T{tp} matrices.
     Supports clustering and contra/ipsi standardization.
+    Supports both matched and independent samples t-tests.
+    Args:
+        df (pd.DataFrame): DataFrame with 'T1_matrix' and f'T{tp}_matrix' columns containing FC matrices.
+        tp (int): Timepoint to compare with T1 (default: 3 → T3).
+        correction (bool): Whether to apply FDR correction (default: True).
+        alpha (float): Significance level for FDR correction (default: 0.05).
+        cluster (bool): Whether to perform clustering on the data (default: False).
+        matched (bool): Whether to use paired t-tests (default: False).
+        roi_labels (list or np.array): List of ROI labels for the matrices.
+        contra_ipsi_split (bool): Whether to split into contra/ipsi matrices.
+        selected_rois (list or np.array): List of selected ROIs for contra/ipsi split.
+        roi_mapping (dict): Mapping of ROI indices to labels for contra/ipsi split.
+    Returns:
+        pd.DataFrame: Significant matrix with ROI labels as index and columns.
     '''
     results = {}
 
@@ -751,9 +800,10 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
 
         # Reorient matrices into standardized ipsi/contra format
         t1_matrices, t_matrices, aligned_labels = reorient_t1_t(df, selected_rois, roi_mapping, tp=tp)
+        #print(t1_matrices)
 
         if not t1_matrices or not t_matrices:
-            raise ValueError("No valid T1 or T{tp} matrices available after reorientation.")
+            raise ValueError(f"No valid T1 or T{tp} matrices available after reorientation.")
 
         sig_matrix, p_corr, reject = analyze_matrices(
             t1_matrices, t_matrices,
@@ -785,7 +835,7 @@ def get_sig_matrix(df, tp=3, correction=True, alpha=0.05, cluster=False, matched
         t_matrices = [m for m in df[f'T{tp}_matrix'] if m is not None]
 
         print("Shape of T1 matrices:", np.shape(t1_matrices))
-        print("Shape of T{tp} matrices:", np.shape(t_matrices))
+        print(f"Shape of T{tp} matrices:", np.shape(t_matrices))
 
         sig_matrix, p_corr, reject = analyze_matrices(
             t1_matrices, t_matrices,
@@ -848,7 +898,7 @@ def compute_FC_diff(df, rois, tp=3):
     
     # Plotting
     plt.figure(figsize=(10, 6))
-    sns.heatmap(diff_array.mean(axis=0), cmap='viridis', cbar=True, annot=False, square=True, vmin=-2, vmax=1, xticklabels=rois, yticklabels=rois)
+    sns.heatmap(diff_array.mean(axis=0), cmap='viridis', cbar=True, annot=False, square=True, vmin=-2, vmax=2, xticklabels=rois, yticklabels=rois)
     plt.title(f"Mean FC Difference (T{tp} - T1)")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
@@ -1197,7 +1247,7 @@ def compute_all_yeo_matrices_as_dataframe(matrices_df, region_to_yeo, rois, subs
 
     # Generate Yeo network labels
     labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
-    print("type of df_out:", type(df_out))
+    #print("type of df_out:", type(df_out))
 
     return df_out, labels
 
@@ -1230,7 +1280,7 @@ def plot_mean_yeo_matrices(all_yeo_matrices, labels):
         mean_yeo = np.nanmean(np.stack(valid_yeo_matrices), axis=0)
 
 
-        sns.heatmap(mean_yeo, ax=axes[idx], cmap='coolwarm', annot=True, fmt=".2f",
+        sns.heatmap(mean_yeo, ax=axes[idx], cmap='coolwarm', vmin=-1, vmax=1, annot=True, fmt=".2f",
                     xticklabels=labels, yticklabels=labels)
         axes[idx].set_title(f"Mean Yeo FC - {timepoint}")
         axes[idx].set_xlabel("Yeo Network")

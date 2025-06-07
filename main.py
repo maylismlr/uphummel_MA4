@@ -422,4 +422,4 @@ if __name__ == "__main__":
     # Run the main function
     rois = [363, 364, 365, 368, 372, 373, 374, 377, 379, 361, 370, 362, 371, 12, 54, 56, 78, 96, 192, 234, 236, 258, 276, 8, 9, 51, 52, 53, 188, 189, 231, 232, 233]
     rois = [roi - 1 for roi in rois]
-    main(rois, request_type='t1_t4', cluster=True, num_clusters=2, split_L_R=True)
+    main(rois, request_type='t1_t4', cluster=True, num_clusters=2, split_L_R=False, correction=True)
