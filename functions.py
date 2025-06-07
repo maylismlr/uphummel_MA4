@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 
 
-def load_excel_data(folder_path):
+def load_excel_data(folder_path, FM_folder_path):
     # Load Excel files
     regression_info = pd.read_excel(f"{folder_path}TiMeS_regression_info_processed.xlsx", engine="openpyxl")
     rsfMRI_full_info = pd.read_excel(f"{folder_path}TiMeS_rsfMRI_full_info.xlsx", engine="openpyxl")
@@ -42,7 +42,54 @@ def load_excel_data(folder_path):
     rsfMRI_full_info['subject_id'] = rsfMRI_full_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
     regression_info['subject_id'] = regression_info['subject_full_id'].astype(str).str[-4:] # Extract last 4 characters of subject_id to match with folder names and subjects
 
-    return regression_info, rsfMRI_full_info
+    for file in os.listdir(FM_folder_path):
+        if not file.endswith('.xlsx'):
+            continue
+
+        file_path = os.path.join(FM_folder_path, file)
+        try:
+            print(f"Trying to load: {file}")
+            df = pd.read_excel(file_path, engine='openpyxl')  # Try reading
+            print(f"✅ Successfully loaded: {file}")
+
+            if 'T1' in file:
+                FM_T1 = df
+            elif 'T2' in file:
+                FM_T2 = df
+            elif 'T3' in file:
+                FM_T3 = df
+            elif 'T4' in file:
+                FM_T4 = df
+
+        except Exception as e:
+            print(f"❌ Error reading {file}: {e}")
+
+    # Rename 'Patient' to 'subject_id'
+    for df in [FM_T1, FM_T2, FM_T3, FM_T4]:
+        if 'Patient' in df.columns:
+            df.rename(columns={'Patient': 'subject_id'}, inplace=True)
+            df.rename(columns={'Fugl.Meyer_affected_TOTAL': 'Fugl_Meyer_contra'}, inplace=True)
+            df.rename(columns={'Fugl.Meyer_unaffected_TOTAL': 'Fugl_Meyer_ipsi'}, inplace=True)
+
+    # Replace first character of each ID with 's'
+    for df in [FM_T1, FM_T2, FM_T3, FM_T4]:
+        if 'subject_id' in df.columns:
+            df['subject_id'] = df['subject_id'].astype(str).apply(lambda x: 's' + x[1:])
+
+    FM_T1['TimePoint'] = 'T1'
+    FM_T2['TimePoint'] = 'T2'
+    FM_T3['TimePoint'] = 'T3'
+    FM_T4['TimePoint'] = 'T4'
+    
+    FM_all = pd.concat([FM_T1, FM_T2, FM_T3, FM_T4], axis=0, ignore_index=True)
+    
+    # Select relevant columns from FM_all
+    FM_subset = FM_all[['subject_id', 'TimePoint', 'Fugl_Meyer_contra', 'Fugl_Meyer_ipsi']]
+
+    # Merge on both 'subject_id' and 'TimePoint'
+    merged_df = pd.merge(regression_info, FM_subset, on=['subject_id', 'TimePoint'], how='left')
+
+    return merged_df, rsfMRI_full_info
 
 
 
@@ -1577,7 +1624,7 @@ def assign_fugl_ipsi_contra(row):
 
 
 def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None):
-    regression_info[["Fugl_Meyer_ipsi", "Fugl_Meyer_contra"]] = regression_info.apply(assign_fugl_ipsi_contra, axis=1)
+    #regression_info[["Fugl_Meyer_ipsi", "Fugl_Meyer_contra"]] = regression_info.apply(assign_fugl_ipsi_contra, axis=1)
     matrices_contra_ipsi, _, roi_labels = reorient_t1_t(df, rois, roi_mapping=roi_mapping, tp=3)
 
     # Match valid subjects (same number as aligned_t1)
