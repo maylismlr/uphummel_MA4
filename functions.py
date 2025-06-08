@@ -241,13 +241,16 @@ def load_matrices(folder_path, rsfMRI_full_info, rois, request_type = 'all', plo
 ############################################### PLOTTING FUNCTIONS #################################
 
 
-
+'''
 def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1_t3'):
-    '''
+    """
     go through all the subjects and plot the matrices as sns heatmaps, with each row being a subject 
     and each column a timepoint. The timepoints can be modulated based on the input.
-    '''
+    """
     num_subjects = len(subjects)
+    print("Subjects:", subjects)
+    print("Number of subjects:", len(subjects))
+
     
     if request_type == 'all':
         timepoints = ['T1', 'T2', 'T3', 'T4']
@@ -265,6 +268,9 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1
             ax = axes[i, j] if num_subjects > 1 else axes[j]
             if timepoint in subject_matrices.columns:
                 matrix = subject_matrices.loc[subject, timepoint]
+                print(f"Plotting subject: {subject}, timepoint: {timepoint}")
+                print(f"Matrix shape: {matrix.shape}")
+
                 sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False, vmin=-1, vmax=1, xticklabels=rois, yticklabels=rois)
                 ax.set_title(f'Subject {subject} - {timepoint}')
             else:
@@ -273,8 +279,56 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1
 
     plt.tight_layout()
     plt.show();
+'''
+def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1_t3'):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from tqdm import tqdm
+
+    if request_type == 'all':
+        timepoints = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
+    elif request_type == 't1_only':
+        timepoints = ['T1_matrix']
+    elif request_type in ['t1_t3', 't1_t3_matched']:
+        timepoints = ['T1_matrix', 'T3_matrix']
+    elif request_type in ['t1_t4', 't1_t4_matched']:
+        timepoints = ['T1_matrix', 'T4_matrix']
+    else:
+        raise ValueError(f"Unknown request_type: {request_type}")
+
+    num_subjects = len(subjects)
+    num_timepoints = len(timepoints)
+
+    fig, axes = plt.subplots(num_subjects, num_timepoints, figsize=(5 * num_timepoints, 3 * num_subjects))
+
+    # Normalize axes to 2D array for consistent indexing
+    if num_subjects == 1 and num_timepoints == 1:
+        axes = np.array([[axes]])
+    elif num_subjects == 1:
+        axes = np.expand_dims(axes, axis=0)  # shape (1, num_timepoints)
+    elif num_timepoints == 1:
+        axes = np.expand_dims(axes, axis=1)  # shape (num_subjects, 1)
+
+    for i, subject in tqdm(enumerate(subjects), total=len(subjects)):
+        for j, timepoint in enumerate(timepoints):
+            ax = axes[i, j]
+            
+            row = subject_matrices[subject_matrices["subject_id"] == subject]
+            if not row.empty and timepoint in row.columns:
+                matrix = row.iloc[0][timepoint]
+                if matrix is None or not hasattr(matrix, "shape") or len(matrix.shape) != 2:
+                    ax.axis('off')
+                    continue
+                sns.heatmap(matrix, ax=ax, cmap='viridis', cbar=False, vmin=-1, vmax=1,
+                            xticklabels=rois, yticklabels=rois)
+                ax.set_title(f'Subject {subject} - {timepoint}')
+            else:
+                ax.axis('off')
+
+    plt.tight_layout()
+    plt.show()
    
-    
 
 def plot_mean_FC_matrices(matrices, rois, subset=False):
     """
@@ -1263,17 +1317,18 @@ def compute_all_yeo_matrices_as_dataframe(matrices_df, region_to_yeo, rois, subs
     
     Args:
         matrices_df (pd.DataFrame): Contains subject_id and T1–T4 FC matrices.
-        region_to_yeo (pd.DataFrame): Glasser-to-Yeo mapping with Glasser_Index, Yeo_Network, yeo_name.
+        region_to_yeo (pd.DataFrame): Glasser-to-Yeo mapping with Glasser_Index, Yeo_Network, yeo_name or network name.
         rois (list or np.array): List of ROI indices to include.
         subset (bool): If True, restrict to provided ROIs; else use all.
 
     Returns:
-        df_out (pd.DataFrame): Same format as FC matrix DataFrame, with Yeo-level matrices.
-        labels (list): Yeo network labels (e.g., ['Visual', 'Somatomotor', ...])
+        df_out (pd.DataFrame): Same format as FC matrix DataFrame, with Yeo-level matrices (as DataFrames).
+        labels (list): Yeo network labels from the **last subject** processed (usually stable).
     """
     timepoints = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
     yeo_label_map = region_to_yeo.set_index('Yeo_Network')['yeo_name'].to_dict()
     all_subjects = []
+    final_labels = None  # Will hold the labels from last subject processed
 
     for _, row in matrices_df.iterrows():
         subject_entry = {'subject_id': row['subject_id']}
@@ -1297,6 +1352,10 @@ def compute_all_yeo_matrices_as_dataframe(matrices_df, region_to_yeo, rois, subs
             key_to_idx = {k: i for i, k in enumerate(key_list)}
             num_networks = len(key_list)
 
+            # Labels for this subject’s matrix
+            labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
+            final_labels = labels  # update global labels with the latest one
+
             # Create Yeo-level FC matrix
             yeo_fc = np.zeros((num_networks, num_networks))
             for i in key_list:
@@ -1306,21 +1365,15 @@ def compute_all_yeo_matrices_as_dataframe(matrices_df, region_to_yeo, rois, subs
                     submatrix = fc_matrix[np.ix_(idx_i, idx_j)]
                     yeo_fc[key_to_idx[i], key_to_idx[j]] = submatrix.mean()
 
-            subject_entry[tp] = yeo_fc
+            yeo_df = pd.DataFrame(yeo_fc, index=labels, columns=labels)
+            subject_entry[tp] = yeo_df
 
         all_subjects.append(subject_entry)
 
     df_out = pd.DataFrame(all_subjects)
-
-    # Ensure alignment with original matrices_df by subject_id
     df_out = df_out.set_index('subject_id').reindex(matrices_df['subject_id']).reset_index()
 
-    # Generate Yeo network labels
-    labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
-    #print("type of df_out:", type(df_out))
-
-    return df_out, labels
-
+    return df_out, final_labels
 
 
 def plot_mean_yeo_matrices(all_yeo_matrices, labels):
