@@ -1142,30 +1142,31 @@ def summarize_significant_differences(p_values_matrix,
 
 def test_normality(df, alpha=0.05):
     """
-    Perform Shapiro-Wilk test for normality on the data.
-    
-    Args:
-        data (array-like): Data to test for normality.
-        alpha (float): Significance level for the test.
-    
-    Returns:
-        bool: True if data is normally distributed, False otherwise.
-    """
-    df = df.copy().drop(columns=["subject_full_id",	"TimePoint", "Behavioral_assessment", "MRI", "Gender", "Age", "Education_level", "Lesion_side_old",	"Lesion_side", "Combined", "Bilateral", "Comments", "Stroke_location"])
-                        #drop (columns=['subject_id', 'Lesion_side', 'Stroke_location', 'lesion_volume_mm3','
-    results = {}
-    for col in df.select_dtypes(include=['float64', 'int64']).columns:
-        stat, p = shapiro(df[col].dropna())
-        results[col] = {'W': stat, 'p-value': p}
+    Perform Shapiro-Wilk test for normality on all numerical columns of a DataFrame.
 
-    # Convert to DataFrame to view nicely
+    Args:
+        df (pd.DataFrame): Input data.
+        alpha (float): Significance level for normality (default = 0.05).
+
+    Returns:
+        pd.DataFrame: Test statistics and normality decision per variable.
+    """
+    results = {}
+    numeric_cols = df.select_dtypes(include=['number']).columns
+
+    for col in numeric_cols:
+        data = df[col].dropna()
+        if len(data) >= 3:  # Shapiro requires at least 3 values
+            stat, p = shapiro(data)
+            results[col] = {'W': stat, 'p-value': p}
+        else:
+            results[col] = {'W': None, 'p-value': None}
+
     shapiro_df = pd.DataFrame(results).T
     shapiro_df.index.name = 'Variable'
     shapiro_df.reset_index(inplace=True)
+    shapiro_df['Normal? (p > alpha)'] = shapiro_df['p-value'] > alpha
 
-    # Mark whether the variable is normally distributed
-    shapiro_df['Normal? (p > 0.05)'] = shapiro_df['p-value'] > 0.05
-    
     return shapiro_df
 
 
