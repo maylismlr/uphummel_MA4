@@ -399,7 +399,7 @@ def create_roi_hemisphere_map(n_rois=379):
             roi_to_hemi[roi] = 'R'
         elif 360 <= roi <= 367:
             roi_to_hemi[roi] = 'L'  # Left subcortical
-        elif 368 <= roi <= 378:
+        elif 368 <= roi < 378:
             roi_to_hemi[roi] = 'R'  # Right subcortical
         elif roi == 378:
             roi_to_hemi[roi] = 'None'  # Cerebellum (not lateralized)

@@ -1,0 +1,380 @@
+Yeo_Network,Glasser_Index,yeo_name
+0,0,Visual
+2,1,Dorsal Attention
+0,2,Visual
+0,3,Visual
+0,4,Visual
+0,5,Visual
+0,6,Visual
+1,7,Somatomotor
+1,8,Somatomotor
+2,9,Dorsal Attention
+2,10,Dorsal Attention
+6,11,Default
+0,12,Visual
+6,13,Default
+5,14,Frontoparietal
+0,15,Visual
+2,16,Dorsal Attention
+0,17,Visual
+0,18,Visual
+0,19,Visual
+0,20,Visual
+0,21,Visual
+0,22,Visual
+1,23,Somatomotor
+3,24,Ventral Attention
+6,25,Default
+6,26,Default
+6,27,Default
+5,28,Frontoparietal
+6,29,Default
+6,30,Default
+6,31,Default
+6,32,Default
+6,33,Default
+6,34,Default
+1,35,Somatomotor
+3,36,Ventral Attention
+3,37,Ventral Attention
+1,38,Somatomotor
+1,39,Somatomotor
+1,40,Somatomotor
+2,41,Dorsal Attention
+3,42,Ventral Attention
+3,43,Ventral Attention
+2,44,Dorsal Attention
+2,45,Dorsal Attention
+2,46,Dorsal Attention
+2,47,Dorsal Attention
+2,48,Dorsal Attention
+2,49,Dorsal Attention
+1,50,Somatomotor
+1,51,Somatomotor
+1,52,Somatomotor
+1,53,Somatomotor
+1,54,Somatomotor
+1,55,Somatomotor
+3,56,Ventral Attention
+5,57,Frontoparietal
+3,58,Ventral Attention
+3,59,Ventral Attention
+6,60,Default
+6,61,Default
+6,62,Default
+6,63,Default
+6,64,Default
+6,65,Default
+6,66,Default
+6,67,Default
+6,68,Default
+6,69,Default
+6,70,Default
+6,71,Default
+5,72,Frontoparietal
+6,73,Default
+6,74,Default
+6,75,Default
+6,76,Default
+3,77,Ventral Attention
+5,78,Frontoparietal
+5,79,Frontoparietal
+5,80,Frontoparietal
+5,81,Frontoparietal
+5,82,Frontoparietal
+5,83,Frontoparietal
+5,84,Frontoparietal
+5,85,Frontoparietal
+6,86,Default
+4,87,Limbic
+6,88,Default
+4,89,Limbic
+5,90,Frontoparietal
+4,91,Limbic
+4,92,Limbic
+6,93,Default
+2,94,Dorsal Attention
+2,95,Dorsal Attention
+5,96,Frontoparietal
+6,97,Default
+3,98,Ventral Attention
+1,99,Somatomotor
+1,100,Somatomotor
+1,101,Somatomotor
+1,102,Somatomotor
+1,103,Somatomotor
+3,104,Ventral Attention
+3,105,Ventral Attention
+1,106,Somatomotor
+3,107,Ventral Attention
+3,108,Ventral Attention
+4,109,Limbic
+5,110,Frontoparietal
+6,111,Default
+3,112,Ventral Attention
+3,113,Ventral Attention
+3,114,Ventral Attention
+2,115,Dorsal Attention
+2,116,Dorsal Attention
+4,117,Limbic
+0,118,Visual
+4,119,Limbic
+0,120,Visual
+4,121,Limbic
+6,122,Default
+1,123,Somatomotor
+1,124,Somatomotor
+0,125,Visual
+0,126,Visual
+6,127,Default
+6,128,Default
+6,129,Default
+4,130,Limbic
+6,131,Default
+6,132,Default
+4,133,Limbic
+4,134,Limbic
+2,135,Dorsal Attention
+2,136,Dorsal Attention
+2,137,Dorsal Attention
+1,138,Somatomotor
+3,139,Ventral Attention
+2,140,Dorsal Attention
+0,141,Visual
+2,142,Dorsal Attention
+5,143,Frontoparietal
+5,144,Frontoparietal
+0,145,Visual
+3,146,Ventral Attention
+3,147,Ventral Attention
+6,148,Default
+6,149,Default
+6,150,Default
+0,151,Visual
+0,152,Visual
+0,153,Visual
+0,154,Visual
+0,155,Visual
+2,156,Dorsal Attention
+0,157,Visual
+0,158,Visual
+0,159,Visual
+6,160,Default
+6,161,Default
+0,162,Visual
+4,163,Limbic
+4,164,Limbic
+4,165,Limbic
+3,166,Ventral Attention
+1,167,Somatomotor
+3,168,Ventral Attention
+6,169,Default
+5,170,Frontoparietal
+4,171,Limbic
+1,172,Somatomotor
+1,173,Somatomotor
+1,174,Somatomotor
+6,175,Default
+6,176,Default
+3,177,Ventral Attention
+5,178,Frontoparietal
+6,179,Default
+0,180,Visual
+0,181,Visual
+0,182,Visual
+0,183,Visual
+0,184,Visual
+0,185,Visual
+0,186,Visual
+1,187,Somatomotor
+1,188,Somatomotor
+2,189,Dorsal Attention
+2,190,Dorsal Attention
+3,191,Ventral Attention
+0,192,Visual
+6,193,Default
+5,194,Frontoparietal
+0,195,Visual
+0,196,Visual
+0,197,Visual
+0,198,Visual
+0,199,Visual
+0,200,Visual
+0,201,Visual
+0,202,Visual
+1,203,Somatomotor
+3,204,Ventral Attention
+6,205,Default
+2,206,Dorsal Attention
+3,207,Ventral Attention
+5,208,Frontoparietal
+6,209,Default
+6,210,Default
+6,211,Default
+6,212,Default
+6,213,Default
+6,214,Default
+1,215,Somatomotor
+3,216,Ventral Attention
+3,217,Ventral Attention
+1,218,Somatomotor
+1,219,Somatomotor
+1,220,Somatomotor
+2,221,Dorsal Attention
+3,222,Ventral Attention
+3,223,Ventral Attention
+2,224,Dorsal Attention
+2,225,Dorsal Attention
+2,226,Dorsal Attention
+2,227,Dorsal Attention
+2,228,Dorsal Attention
+2,229,Dorsal Attention
+1,230,Somatomotor
+1,231,Somatomotor
+1,232,Somatomotor
+1,233,Somatomotor
+1,234,Somatomotor
+1,235,Somatomotor
+3,236,Ventral Attention
+3,237,Ventral Attention
+3,238,Ventral Attention
+3,239,Ventral Attention
+6,240,Default
+6,241,Default
+5,242,Frontoparietal
+6,243,Default
+6,244,Default
+6,245,Default
+5,246,Frontoparietal
+6,247,Default
+6,248,Default
+6,249,Default
+6,250,Default
+6,251,Default
+5,252,Frontoparietal
+5,253,Frontoparietal
+6,254,Default
+6,255,Default
+5,256,Frontoparietal
+3,257,Ventral Attention
+5,258,Frontoparietal
+2,259,Dorsal Attention
+5,260,Frontoparietal
+5,261,Frontoparietal
+5,262,Frontoparietal
+5,263,Frontoparietal
+5,264,Frontoparietal
+5,265,Frontoparietal
+6,266,Default
+4,267,Limbic
+5,268,Frontoparietal
+4,269,Limbic
+5,270,Frontoparietal
+4,271,Limbic
+4,272,Limbic
+6,273,Default
+2,274,Dorsal Attention
+2,275,Dorsal Attention
+5,276,Frontoparietal
+5,277,Frontoparietal
+1,278,Somatomotor
+1,279,Somatomotor
+1,280,Somatomotor
+1,281,Somatomotor
+1,282,Somatomotor
+1,283,Somatomotor
+3,284,Ventral Attention
+3,285,Ventral Attention
+1,286,Somatomotor
+3,287,Ventral Attention
+3,288,Ventral Attention
+4,289,Limbic
+5,290,Frontoparietal
+3,291,Ventral Attention
+3,292,Ventral Attention
+3,293,Ventral Attention
+1,294,Somatomotor
+2,295,Dorsal Attention
+2,296,Dorsal Attention
+4,297,Limbic
+0,298,Visual
+4,299,Limbic
+0,300,Visual
+4,301,Limbic
+6,302,Default
+1,303,Somatomotor
+1,304,Somatomotor
+0,305,Visual
+0,306,Visual
+6,307,Default
+6,308,Default
+6,309,Default
+4,310,Limbic
+6,311,Default
+5,312,Frontoparietal
+4,313,Limbic
+4,314,Limbic
+2,315,Dorsal Attention
+2,316,Dorsal Attention
+2,317,Dorsal Attention
+3,318,Ventral Attention
+2,319,Dorsal Attention
+2,320,Dorsal Attention
+0,321,Visual
+2,322,Dorsal Attention
+5,323,Frontoparietal
+5,324,Frontoparietal
+2,325,Dorsal Attention
+3,326,Ventral Attention
+3,327,Ventral Attention
+5,328,Frontoparietal
+6,329,Default
+6,330,Default
+0,331,Visual
+0,332,Visual
+0,333,Visual
+0,334,Visual
+0,335,Visual
+2,336,Dorsal Attention
+0,337,Visual
+0,338,Visual
+0,339,Visual
+6,340,Default
+6,341,Default
+0,342,Visual
+4,343,Limbic
+6,344,Default
+4,345,Limbic
+3,346,Ventral Attention
+1,347,Somatomotor
+3,348,Ventral Attention
+5,349,Frontoparietal
+5,350,Frontoparietal
+4,351,Limbic
+1,352,Somatomotor
+1,353,Somatomotor
+1,354,Somatomotor
+6,355,Default
+6,356,Default
+3,357,Ventral Attention
+5,358,Frontoparietal
+6,359,Default
+7,360,Subcortical
+7,361,Subcortical
+7,362,Subcortical
+7,363,Subcortical
+7,364,Subcortical
+7,365,Subcortical
+7,366,Subcortical
+7,367,Subcortical
+7,368,Subcortical
+7,369,Subcortical
+7,370,Subcortical
+7,371,Subcortical
+7,372,Subcortical
+7,373,Subcortical
+7,374,Subcortical
+7,375,Subcortical
+7,376,Subcortical
+7,377,Subcortical
+7,378,Subcortical
