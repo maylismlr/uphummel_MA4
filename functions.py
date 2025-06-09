@@ -1805,3 +1805,100 @@ def modularity_correlation(
     plt.show()
 
     return r, p
+
+
+############################################## HEMISPHERIC SYMETRY ################################
+
+def check_network_symmetry(region_to_yeo, region_to_hemi, roi_indices):
+    sub_yeo = region_to_yeo[region_to_yeo['Glasser_Index'].isin(roi_indices)]
+    sub_yeo = sub_yeo.set_index('Glasser_Index')  # << key fix
+    sub_hemi = region_to_hemi.loc[roi_indices]
+    combined = sub_yeo.merge(sub_hemi, left_index=True, right_index=True)
+    counts = combined.groupby(['Yeo_Network', 'Hemisphere']).size()
+    #print("Yeo-Hemisphere counts:\n", counts)
+    return counts
+
+def compute_system_segregation(fc_df, region_to_yeo):
+    segregation_scores = []
+    for idx in range(fc_df.shape[0]):
+        region_network = region_to_yeo.loc[idx, 'Yeo_Network']
+        same_net = [i for i in range(fc_df.shape[0]) if region_to_yeo.loc[i, 'Yeo_Network'] == region_network and i != idx]
+        diff_net = [i for i in range(fc_df.shape[0]) if region_to_yeo.loc[i, 'Yeo_Network'] != region_network]
+
+        within_vals = fc_df.iloc[idx, same_net].values if same_net else np.nan
+        between_vals = fc_df.iloc[idx, diff_net].values if diff_net else np.nan
+
+        within = np.nanmean(within_vals)
+        between = np.nanmean(between_vals)
+        #print(f"within: {within}, between: {between}")
+        if np.isnan(within) or np.isnan(between) or between == 0:
+            segregation_scores.append(np.nan)
+        else:
+            segregation_scores.append(within / between)
+    return segregation_scores
+
+
+def compute_hemispheric_symmetry(seg_scores, region_to_hemi):
+    # Ensure alignment
+    df = pd.DataFrame({'score': seg_scores})
+    df['hemi'] = region_to_hemi['Hemisphere'].values
+
+    # Filter and drop NaNs/infs
+    df = df[df['hemi'].isin(['L', 'R'])]
+    df = df.replace([np.inf, -np.inf], np.nan).dropna()
+
+    left = df[df['hemi'] == 'L']['score'].values
+    right = df[df['hemi'] == 'R']['score'].values
+
+    min_len = min(len(left), len(right))
+    if min_len < 5:  # optional sanity threshold
+        return np.nan
+    return pearsonr(left[:min_len], right[:min_len])[0]
+
+def compute_symmetry_from_fc_df(fc_df, region_to_yeo, region_to_hemi):
+    results = []
+
+    for _, row in fc_df.iterrows():
+        subject = row['subject_id']
+
+        for timepoint in ['T1_matrix', 'T3_matrix', 'T4_matrix']:
+            fc_matrix = row[timepoint]
+            if fc_matrix is None:
+                continue
+
+            # Exclude cerebellum (index 378)
+            roi_indices = [i for i in fc_matrix.index if i != 378]
+            fc_matrix = fc_matrix.loc[roi_indices, roi_indices]
+
+            # Subset metadata
+            sub_yeo = region_to_yeo.set_index('Glasser_Index').loc[roi_indices].copy()
+            sub_hemi = region_to_hemi.loc[roi_indices].copy()
+
+            # Sanity check: filter only L/R
+            sub_hemi = sub_hemi[sub_hemi['Hemisphere'].isin(['L', 'R'])]
+            valid_indices = sub_hemi.index.intersection(sub_yeo.index)
+            fc_matrix = fc_matrix.loc[valid_indices, valid_indices]
+            sub_yeo = sub_yeo.loc[valid_indices]
+            sub_hemi = sub_hemi.loc[valid_indices]
+
+            # Reindex for clean downstream use
+            roi_map = {old_idx: new_idx for new_idx, old_idx in enumerate(valid_indices)}
+            fc_matrix_reindexed = fc_matrix.rename(index=roi_map, columns=roi_map)
+            sub_yeo.index = range(len(valid_indices))
+            sub_hemi.index = range(len(valid_indices))
+
+
+            # Compute segregation and symmetry
+            seg_scores = compute_system_segregation(fc_matrix_reindexed, sub_yeo)
+            valid_left = sum((~np.isnan(seg_scores)) & (sub_hemi['Hemisphere'] == 'L').values)
+            valid_right = sum((~np.isnan(seg_scores)) & (sub_hemi['Hemisphere'] == 'R').values)
+            #print(f"[{subject} - {timepoint}] valid L: {valid_left}, valid R: {valid_right}")
+            symmetry = compute_hemispheric_symmetry(seg_scores, sub_hemi)
+
+            results.append({
+                'subject_id': subject,
+                'timepoint': timepoint.replace('_matrix', ''),
+                'hemispheric_symmetry': symmetry
+            })
+
+    return pd.DataFrame(results)
