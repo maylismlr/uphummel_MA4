@@ -1730,7 +1730,7 @@ def compute_modularity(fc_df):
         return np.nan
 
 
-
+'''
 def modularity_correlation(
     modularity_df,
     regression_info,
@@ -1800,6 +1800,82 @@ def modularity_correlation(
     plt.xlabel(f"Modularity (T{tp})")
     plt.ylabel(f"{motor_test} (T{tp})")
     plt.title(f"{corr_type.capitalize()} correlation: Modularity vs {motor_test} at T{tp}\n"
+              f"r = {r:.2f}, p = {p:.4f}")
+    plt.tight_layout()
+    plt.show()
+
+    return r, p'''
+    
+def metrics_correlation(
+    modularity_df,
+    regression_info,
+    tp=3,
+    motor_test='nmf_motor',
+    corr_type='pearsonr',
+    metric = 'Modularity'
+):
+    """
+    Correlate modularity values at a specific timepoint with motor test scores.
+
+    Args:
+        modularity_df (DataFrame): Must contain modularity values in columns like 'T1_matrix', 'T2_matrix', etc.
+        regression_info (DataFrame): Behavioral data with 'TimePoint', 'subject_id', and motor score columns.
+        tp (int): Timepoint to use (e.g., 1, 3, 4).
+        motor_test (str): Column name of the motor score to correlate.
+        corr_type (str): 'pearsonr' or 'spearmanr'.
+
+    Returns:
+        r (float), p (float): Correlation coefficient and p-value.
+    """
+    # Match timepoint column name in modularity_df
+    tp_col = f"T{tp}_matrix"
+
+    if tp_col not in modularity_df.columns:
+        print(f"{tp_col} not found in modularity_df")
+        return None, None
+
+    # Filter behavioral data
+    regression_t = regression_info[
+        (regression_info["TimePoint"] == f"T{tp}") &
+        (regression_info["Behavioral_assessment"] == 1) &
+        (regression_info["MRI"] == 1)
+    ].copy()
+
+    if motor_test not in regression_t.columns:
+        print(f"Motor test '{motor_test}' not found in regression_info.")
+        return None, None
+
+    df = modularity_df.copy()
+    df["subject_id"] = df["subject_id"].astype(str)  # ensure string
+    regression_t["subject_id"] = regression_t["subject_id"].astype(str)
+
+    merged = df.merge(regression_t[["subject_id", motor_test]], on="subject_id")
+
+
+    modularity_scores = merged[tp_col].values
+    motor_scores = merged[motor_test].values
+
+    # Remove NaNs
+    valid = ~np.isnan(modularity_scores) & ~np.isnan(motor_scores)
+
+    if valid.sum() < 3:
+        print("Not enough valid data points for correlation.")
+        return None, None
+
+    # Perform correlation
+    if corr_type == 'pearsonr':
+        r, p = pearsonr(modularity_scores[valid], motor_scores[valid])
+    elif corr_type == 'spearmanr':
+        r, p = spearmanr(modularity_scores[valid], motor_scores[valid])
+    else:
+        raise ValueError("corr_type must be 'pearsonr' or 'spearmanr'")
+
+    # Plot
+    plt.figure(figsize=(6, 5))
+    sns.regplot(x=modularity_scores[valid], y=motor_scores[valid])
+    plt.xlabel(f"{metric} (T{tp})")
+    plt.ylabel(f"{motor_test} (T{tp})")
+    plt.title(f"{corr_type.capitalize()} correlation: {metric} vs {motor_test} at T{tp}\n"
               f"r = {r:.2f}, p = {p:.4f}")
     plt.tight_layout()
     plt.show()
@@ -1902,3 +1978,5 @@ def compute_symmetry_from_fc_df(fc_df, region_to_yeo, region_to_hemi):
             })
 
     return pd.DataFrame(results)
+
+
