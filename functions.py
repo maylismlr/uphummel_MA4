@@ -18,6 +18,12 @@ from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
 from scipy.stats import shapiro, wilcoxon, pearsonr, spearmanr
 
+# for regression
+from sklearn.linear_model import Ridge
+from sklearn.feature_selection import RFE
+from sklearn.model_selection import GridSearchCV, RepeatedKFold
+from sklearn.pipeline import Pipeline
+
 
 # for prettiness <3
 from tqdm import tqdm
@@ -1679,7 +1685,7 @@ def assign_fugl_ipsi_contra(row):
 
 
 
-def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None):
+def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None, keep_cerebellum = False):
     #regression_info[["Fugl_Meyer_ipsi", "Fugl_Meyer_contra"]] = regression_info.apply(assign_fugl_ipsi_contra, axis=1)
     matrices_contra_ipsi, _, roi_labels = reorient_t1_t(df, rois, roi_mapping=roi_mapping, tp=3)
 
@@ -1690,6 +1696,8 @@ def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None):
         mat1 = row['T1_matrix']
         mat = row[f'T{tp}_matrix']  # or whatever T you chose
         lesion = row['Lesion_side']
+    
+        
         if mat1 is None or mat is None or lesion not in ['L', 'R']:
             continue
         valid_subject_ids.append(row['subject_id'])
@@ -1980,3 +1988,83 @@ def compute_symmetry_from_fc_df(fc_df, region_to_yeo, region_to_hemi):
     return pd.DataFrame(results)
 
 
+######################################## Regression #########################################
+
+def run_Ridge_with_RFE(X_df_clean, y, param_grid):
+    """
+    Runs Ridge regression with Recursive Feature Elimination (RFE) and performs 
+    grid search to select the optimal number of features based on cross-validated R² score.
+
+    This function:
+    - Standardizes input features using StandardScaler
+    - Applies RFE to select top features using Ridge regression as the estimator
+    - Performs a grid search over different numbers of features
+    - Evaluates performance using repeated K-Fold cross-validation
+    - Prints the best model configuration and top predictive features
+    - Returns the selected feature names and the fitted GridSearchCV object
+
+    Parameters
+    ----------
+    X_df_clean : pandas.DataFrame
+        DataFrame of shape (n_samples, n_features) containing preprocessed and labeled input features.
+    y : array-like of shape (n_samples,)
+        Target variable (e.g., motor scores).
+    param_grid : dict
+        Dictionary defining the grid of 'rfe__n_features_to_select' values to search over.
+
+    Returns
+    -------
+    selected_feature_names : list of str
+        List of ROIxROI feature names selected by the best RFE model.
+    grid : sklearn.model_selection.GridSearchCV
+        Fitted GridSearchCV object containing the best estimator and CV results.
+
+    Notes
+    -----
+    The pipeline used is:
+        StandardScaler → RFE(Ridge) → Ridge
+
+    Cross-validation strategy: RepeatedKFold(n_splits=5, n_repeats=10)
+    Scoring metric: R² (coefficient of determination)
+    """
+    
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("rfe", RFE(estimator=Ridge(alpha=1.0))),
+        ("ridge", Ridge(alpha=1.0))
+    ])
+    cv = RepeatedKFold(n_splits=5, n_repeats=10, random_state=42)
+
+    grid = GridSearchCV(pipe, param_grid, cv=cv, scoring='r2')
+    grid.fit(X_df_clean, y)
+
+    # Step 6: Results
+    print("Best number of features:", grid.best_params_['rfe__n_features_to_select'])
+    print("Best cross-validated R² score:", grid.best_score_)
+
+    # Step 7: Feature interpretation
+    best_rfe = grid.best_estimator_.named_steps['rfe']
+    support = best_rfe.support_
+    #selected_features = np.array(feature_names)[support]
+
+    # To get indices of selected features:
+    selected_indices = [i for i, keep in enumerate(support) if keep]
+    # Get all feature names from X_df_clean
+    all_feature_names = X_df_clean.columns.tolist()
+    # Get the names of the selected features
+    selected_feature_names = [all_feature_names[i] for i in selected_indices]
+    #print("Selected feature names:", selected_feature_names)
+
+    best_ridge = grid.best_estimator_.named_steps['ridge']
+    coefficients = best_ridge.coef_
+
+    # Match coefficients with feature names
+    feature_importance = pd.DataFrame({
+        "Feature": selected_feature_names,
+        "Weight": coefficients
+    }).sort_values(by="Weight", key=np.abs, ascending=False)
+
+    print("Top predictive features:")
+    print(feature_importance.head(10))
+    
+    return selected_feature_names, grid
