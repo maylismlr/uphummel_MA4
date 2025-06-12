@@ -2082,7 +2082,7 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
 
 
 
-def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None):
+def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None, param_grid=None):
     
         
     t1_t3_t4_matched_sel = df_aligned.copy()
@@ -2119,8 +2119,13 @@ def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_scor
     X_df = pd.DataFrame(X, columns=feature_names)  # No scaling
     X_df_clean = X_df.dropna(axis=1)
     
+    '''if param_grid is None:
+        param_grid = {
+        "rfe__n_features_to_select": [5, 10, 17, 18, 19, 20, 21, 22, 23, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
+        }'''
+    
     param_grid = {
-    "rfe__n_features_to_select": [5, 10, 17, 18, 19, 20, 21, 22, 23, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
+        "rfe__n_features_to_select": [5, 10, 17, 18, 19, 20, 21, 22, 23, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
     }
     
     y = valid_data[motor_score].values
