@@ -19,10 +19,14 @@ from statsmodels.stats.multitest import multipletests
 from scipy.stats import shapiro, wilcoxon, pearsonr, spearmanr
 
 # for regression
-from sklearn.linear_model import Ridge
-from sklearn.feature_selection import RFE
-from sklearn.model_selection import GridSearchCV, RepeatedKFold
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import RepeatedKFold, cross_val_score, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.inspection import permutation_importance
+from sklearn.feature_selection import RFE
+from sklearn.linear_model import LinearRegression, Ridge
 
 
 # for prettiness <3
@@ -523,6 +527,13 @@ def split_by_lesion_side(df):
     df_L = df[df['Lesion_side'] == 'L'].copy()
     df_R = df[df['Lesion_side'] == 'R'].copy()
     return df_L, df_R
+
+
+
+def keep_selected_rows(mat, selected_rois):
+    if mat is None:
+        return None
+    return mat.loc[selected_rois, :]
 
 
 
@@ -1708,7 +1719,7 @@ def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None, kee
         "T1_matrix": matrices_contra_ipsi  # reoriented FC matrices
     })
     
-    return df_aligned, regression_info
+    return df_aligned
 
 
 
@@ -2068,3 +2079,151 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
     print(feature_importance.head(10))
     
     return selected_feature_names, grid
+
+
+
+def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None):
+    
+        
+    t1_t3_t4_matched_sel = df_aligned.copy()
+
+    for col in ['T1_matrix', 'T3_matrix', 'T_matrix']:
+        if col in df_aligned.columns:
+            t1_t3_t4_matched_sel[col] = df_aligned[col].apply(lambda mat: keep_selected_rows(mat, striatum_labels))
+
+    selected_col = 'T1_matrix'
+    
+    regression_t = regression_info[
+        (regression_info["TimePoint"] == f"T{tp}") &
+        (regression_info["Behavioral_assessment"] == 1) &
+        (regression_info["MRI"] == 1)
+    ].copy()
+    
+    valid_data = t1_t3_t4_matched_sel.merge(
+        regression_t[["subject_id", "nmf_motor", "Fugl_Meyer_contra", "Fugl_Meyer_ipsi"]],
+        on="subject_id"
+    )
+    
+    X = np.array([fc.values.flatten() for fc in valid_data[selected_col]]) 
+
+    # Example matrix from one subject
+    example_fc = valid_data[selected_col].iloc[0]  # shape (8, 33)
+
+    # Extract row and column labels
+    row_labels = example_fc.index.tolist()
+    col_labels = example_fc.columns.tolist()
+
+    # Create ROIxROI feature names
+    feature_names = [f"{row}|{col}" for row in row_labels for col in col_labels]
+
+    X_df = pd.DataFrame(X, columns=feature_names)  # No scaling
+    X_df_clean = X_df.dropna(axis=1)
+    
+    param_grid = {
+    "rfe__n_features_to_select": [5, 10, 17, 18, 19, 20, 21, 22, 23, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
+    }
+    
+    y = valid_data[motor_score].values
+    
+    return X_df_clean, y, param_grid
+
+def run_whole_pipeline(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None):
+    """
+    Run the whole pipeline for feature selection and model training.
+    """
+    
+    X_df_clean, y, param_grid = preprocess_data_for_regression(df_aligned, regression_info, tp, motor_score, striatum_labels)
+
+    selected_feature_names, grid = run_Ridge_with_RFE(X_df_clean, y, param_grid)
+    
+    # Step 1: Predict with the best model on all data
+    y_pred = grid.best_estimator_.predict(X_df_clean)
+
+    # Step 2: Evaluate performance
+    r2 = r2_score(y, y_pred)
+    mse = mean_squared_error(y, y_pred)
+    mae = mean_absolute_error(y, y_pred)
+
+    print(f"R² on full data: {r2:.3f}")
+    print(f"Mean Squared Error: {mse:.3f}")
+    print(f"Mean Absolute Error: {mae:.3f}")
+    
+    print("Plotting data distribution and predictions for", motor_score, "at time point T", tp)
+
+    plt.figure(figsize=(6, 6))
+    plt.scatter(y, y_pred, edgecolor='k')
+    plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=2)
+    plt.xlabel("True motor scores")
+    plt.ylabel("Predicted motor scores")
+    plt.title("True vs. Predicted")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    
+    sns.histplot(y, kde=True)
+    plt.title("Distribution of y")
+    plt.show()
+
+
+    y_sorted = np.sort(y)
+    cdf = 1.0 - np.arange(1, len(y_sorted) + 1) / len(y_sorted)
+    
+    print("Plotting CDF for", motor_score, "at time point T", tp, ", min/max:", y.min(), y.max())
+
+    plt.figure(figsize=(6, 5))
+    plt.loglog(y_sorted, cdf, marker='o', linestyle='none')
+    plt.xlabel(f"y ({motor_score} scores)")
+    plt.ylabel("1 - CDF (log-log)")
+    plt.title(f"Log-Log CDF Plot of {motor_score} Scores")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    
+    print("Plotting histogram with log-scaled y-axis for", motor_score, "at time point T", tp, "to check for right-skewed distribution")
+
+    sns.histplot(y, bins=30, log_scale=(False, True))
+    plt.title("Histogram with Log-Scaled Y-Axis of " + motor_score)
+    plt.xlabel("Motor scores")
+    plt.ylabel("Log frequency")
+    plt.show()
+    
+    print("Plotting histogram of log1p(max - y) for", motor_score, "at time point T", tp, "to check for left-skewed distribution")
+    
+    y_reflected_log = np.log1p(y.max() - y)
+    plt.figure(figsize=(6, 6))
+    sns.histplot(y_reflected_log, kde=True)
+    plt.title(f"Histogram of log1p(max - y) for {motor_score}")
+    plt.xlabel("log1p(max - y)")
+    plt.ylabel("Frequency")
+    plt.show()
+    
+    print("Running Ridge regression with RFE on reflected log-transformed y for", motor_score, "at time point T", tp)
+
+    selected_feature_names, grid = run_Ridge_with_RFE(X_df_clean, y_reflected_log, param_grid)
+    
+    
+    print("Running Ridge regression with RFE on log-transformed y for", motor_score, "at time point T", tp)
+    
+    # Shift y if needed to avoid log(0)
+    y_transformed = np.log1p(y)  # log(1 + y)
+    
+    selected_feature_names, grid = run_Ridge_with_RFE(X_df_clean, y_transformed, param_grid)
+    
+    #### Random Forst Regression
+    
+    print("Running Random Forest regression with cross-validation for", motor_score, "at time point T", tp)
+    
+    # Pipeline: standardize, then fit Random Forest
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),  # optional, not always needed for RF
+        ("rf", RandomForestRegressor(n_estimators=100, random_state=42))
+    ])
+
+    # Cross-validation
+    cv = RepeatedKFold(n_splits=5, n_repeats=10, random_state=42)
+    scores = cross_val_score(pipe, X_df_clean, y, cv=cv, scoring='r2')
+    print("Random Forest R² (CV):", scores.mean())
+    
+    return selected_feature_names, grid
+
+# I have to think about what I want to return !!
