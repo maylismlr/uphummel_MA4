@@ -1696,7 +1696,7 @@ def assign_fugl_ipsi_contra(row):
 
 
 
-def switch_contra_ipsi_df(df, regression_info, rois, tp=3, roi_mapping=None, keep_cerebellum = False):
+def switch_contra_ipsi_df(df, rois, tp=3, roi_mapping=None):
     #regression_info[["Fugl_Meyer_ipsi", "Fugl_Meyer_contra"]] = regression_info.apply(assign_fugl_ipsi_contra, axis=1)
     matrices_contra_ipsi, _, roi_labels = reorient_t1_t(df, rois, roi_mapping=roi_mapping, tp=3)
 
