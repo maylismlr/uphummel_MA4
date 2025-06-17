@@ -1999,6 +1999,13 @@ def compute_symmetry_from_fc_df(fc_df, region_to_yeo, region_to_hemi):
     return pd.DataFrame(results)
 
 
+######################################## Homotopy #########################################
+
+def compute_mean_homotopic_fc(fc_df, pairs):
+    values = [fc_df.loc[i, j] for i, j in pairs]
+    return pd.Series(values).mean()
+
+
 ######################################## Regression #########################################
 
 def run_Ridge_with_RFE(X_df_clean, y, param_grid):
