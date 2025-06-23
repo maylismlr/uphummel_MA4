@@ -1722,6 +1722,42 @@ def switch_contra_ipsi_df(df, rois, tp=3, roi_mapping=None):
     return df_aligned
 
 
+def check_corr(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fugl_Meyer_ipsi', corr_type='pearsonr'):
+    # Step 1: Merge to ensure alignment
+    merged = df_aligned.merge(regression_T1[["subject_id", motor_test]], on="subject_id")
+
+    # Step 2: Extract FC values
+    fc_values = merged["T1_matrix"].apply(
+        lambda mat: mat.loc[region1, region2] if region1 in mat.index and region2 in mat.columns else np.nan
+    ).to_numpy()
+
+    motor_scores = merged[motor_test].to_numpy()
+
+    # Step 3: Clean and correlate
+    valid = ~np.isnan(fc_values) & ~np.isnan(motor_scores)
+    if valid.sum() < 3:
+        print("Not enough valid data to compute correlation.")
+        return None
+
+    if corr_type == 'pearsonr':
+        corr, pval = pearsonr(fc_values[valid], motor_scores[valid])
+        print(f"Pearson r = {corr:.3f}, p = {pval:.3f}")
+    elif corr_type == 'spearmanr':
+        corr, pval = spearmanr(fc_values[valid], motor_scores[valid])
+        print(f"Spearman r = {corr:.3f}, p = {pval:.3f}")
+    else:
+        raise ValueError("Unsupported correlation type. Use 'pearsonr' or 'spearmanr'.")
+
+    # Step 4: Plot
+    plt.scatter(fc_values[valid], motor_scores[valid])
+    plt.xlabel(f"{region1} x {region2} (T1_matrix)")
+    plt.ylabel(f"{motor_test} (T{tp})")
+    plt.title(f"{corr_type.capitalize()} Correlation")
+    plt.show()
+
+    return None
+
+
 
 ######################################### MODULARITY COMPUTATION ############################
 
