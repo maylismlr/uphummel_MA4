@@ -27,6 +27,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.inspection import permutation_importance
 from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression, Ridge
+from scipy.stats import linregress
 
 
 # for prettiness <3
@@ -412,9 +413,9 @@ def create_roi_hemisphere_map(n_rois=379):
         elif 368 <= roi < 378:
             roi_to_hemi[roi] = 'R'  # Right subcortical
         elif roi == 378:
-            roi_to_hemi[roi] = 'None'  # Cerebellum (not lateralized)
-        else:
-            roi_to_hemi[roi] = 'Cerebellum'  # Cerebellum (not lateralized)
+            roi_to_hemi[roi] = 'None'  # Brain stem (not lateralized)
+       # else:
+        #    roi_to_hemi[roi] = 'Cerebellum'  # Brain stem (not lateralized)
     return roi_to_hemi
 
 
@@ -1742,6 +1743,21 @@ def check_corr(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fu
     if corr_type == 'pearsonr':
         corr, pval = pearsonr(fc_values[valid], motor_scores[valid])
         print(f"Pearson r = {corr:.3f}, p = {pval:.3f}")
+        
+        # Plot with regression line
+        plt.scatter(fc_values[valid], motor_scores[valid], label="Data")
+        slope, intercept, _, _, _ = linregress(fc_values[valid], motor_scores[valid])
+        x_vals = np.linspace(min(fc_values[valid]), max(fc_values[valid]), 100)
+        y_vals = slope * x_vals + intercept
+        plt.plot(x_vals, y_vals, color='red', label=f"r = {corr:.2f}, p = {pval:.3f}")
+        plt.xlabel(f"{region1} x {region2} (T1_matrix)")
+        plt.ylabel(f"{motor_test} (T{tp})")
+        plt.title("Pearson Correlation with Fit Line")
+        plt.legend()
+        plt.show()
+        
+        return None
+
     elif corr_type == 'spearmanr':
         corr, pval = spearmanr(fc_values[valid], motor_scores[valid])
         print(f"Spearman r = {corr:.3f}, p = {pval:.3f}")
@@ -1997,7 +2013,7 @@ def compute_symmetry_from_fc_df(fc_df, region_to_yeo, region_to_hemi):
             if fc_matrix is None:
                 continue
 
-            # Exclude cerebellum (index 378)
+            # Exclude brainstem (index 378)
             roi_indices = [i for i in fc_matrix.index if i != 378]
             fc_matrix = fc_matrix.loc[roi_indices, roi_indices]
 
