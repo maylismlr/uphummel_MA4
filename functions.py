@@ -28,6 +28,7 @@ from sklearn.inspection import permutation_importance
 from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression, Ridge
 from scipy.stats import linregress
+from scipy.stats import zscore
 
 
 # for prettiness <3
@@ -852,7 +853,7 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
         xticklabels=roi_labels,
         yticklabels=roi_labels
     )
-    plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
+    #plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.xticks(rotation=45, ha='right')
@@ -1761,17 +1762,93 @@ def check_corr(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fu
     elif corr_type == 'spearmanr':
         corr, pval = spearmanr(fc_values[valid], motor_scores[valid])
         print(f"Spearman r = {corr:.3f}, p = {pval:.3f}")
+            # Step 4: Plot
+        plt.scatter(fc_values[valid], motor_scores[valid])
+        plt.plot([], [], ' ', label=f"r = {corr:.2f}, p = {pval:.3f}")
+        plt.xlabel(f"{region1} x {region2} (T1_matrix)")
+        plt.ylabel(f"{motor_test} (T{tp})")
+        plt.title(f"{corr_type.capitalize()} Correlation")
+        plt.legend()
+        plt.show()
+        
+        return None
+
     else:
         raise ValueError("Unsupported correlation type. Use 'pearsonr' or 'spearmanr'.")
 
-    # Step 4: Plot
-    plt.scatter(fc_values[valid], motor_scores[valid])
-    plt.xlabel(f"{region1} x {region2} (T1_matrix)")
-    plt.ylabel(f"{motor_test} (T{tp})")
-    plt.title(f"{corr_type.capitalize()} Correlation")
-    plt.show()
+def check_corr_cleaned(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fugl_Meyer_ipsi', corr_type='pearsonr', z_thresh=3.0):
+    # Merge datasets
+    merged = df_aligned.merge(regression_T1[["subject_id", motor_test]], on="subject_id")
 
-    return None
+    # Extract FC values
+    fc_values = merged["T1_matrix"].apply(
+        lambda mat: mat.loc[region1, region2] if region1 in mat.index and region2 in mat.columns else np.nan
+    ).to_numpy()
+
+    motor_scores = merged[motor_test].to_numpy()
+
+    # Clean and remove NaNs
+    valid = ~np.isnan(fc_values) & ~np.isnan(motor_scores)
+    fc_values_clean = fc_values[valid]
+    motor_scores_clean = motor_scores[valid]
+
+    # Set quantile thresholds
+    lower_q = 0.05
+    upper_q = 0.95
+
+    # Calculate quantile bounds
+    mod_low, mod_high = np.quantile(fc_values_clean, [lower_q, upper_q])
+    motor_low, motor_high = np.quantile(fc_values_clean, [lower_q, upper_q])
+
+    # Keep only values within the quantile range for both variables
+    non_outliers = (
+        (fc_values_clean >= mod_low) & (fc_values_clean <= mod_high) &
+        (fc_values_clean >= motor_low) & (fc_values_clean <= motor_high)
+    )
+
+    # Filter out outliers
+    fc_filtered = fc_values_clean[non_outliers]
+    motor_filtered = motor_scores_clean[non_outliers]
+
+    if len(fc_filtered) < 3:
+        print("Not enough data points after outlier removal.")
+        return None
+
+    # Compute correlation
+    if corr_type == 'pearsonr':
+        corr, pval = pearsonr(fc_filtered, motor_filtered)
+        print(f"Pearson r = {corr:.3f}, p = {pval:.3f}")
+        
+        # Plot
+        plt.scatter(fc_filtered, motor_filtered, label="Data")
+        slope, intercept, _, _, _ = linregress(fc_filtered, motor_filtered)
+        x_vals = np.linspace(min(fc_filtered), max(fc_filtered), 100)
+        y_vals = slope * x_vals + intercept
+        plt.plot(x_vals, y_vals, color='red', label=f"r = {corr:.2f}, p = {pval:.3f}")
+        plt.xlabel(f"{region1} x {region2} (T1_matrix)")
+        plt.ylabel(f"{motor_test} (T{tp})")
+        plt.title("Pearson Correlation with Outliers Removed")
+        plt.legend()
+        plt.show()
+        
+    elif corr_type == 'spearmanr':
+        corr, pval = spearmanr(fc_filtered, motor_filtered)
+        print(f"Spearman r = {corr:.3f}, p = {pval:.3f}")
+        
+        plt.scatter(fc_filtered, motor_filtered, label="Data")
+        
+        # Add correlation info as a legend entry
+        plt.plot([], [], ' ', label=f"r = {corr:.2f}, p = {pval:.3f}")  # invisible line just for legend
+        plt.xlabel(f"{region1} x {region2} (T1_matrix)")
+        plt.ylabel(f"{motor_test} (T{tp})")
+        plt.title("Spearman Correlation with Outliers Removed")
+        plt.legend()
+        plt.show()
+
+    else:
+        raise ValueError("Unsupported correlation type. Use 'pearsonr' or 'spearmanr'.")
+
+    return corr, pval
 
 
 
@@ -1952,6 +2029,104 @@ def metrics_correlation(
     plt.show()
 
     return r, p
+
+
+
+def metrics_correlation_cleaned(
+    modularity_df,
+    regression_info,
+    tp=3,
+    motor_test='nmf_motor',
+    corr_type='pearsonr',
+    metric='Modularity',
+    z_thresh=3.0
+):
+    """
+    Correlate modularity values at a specific timepoint with motor test scores, removing outliers.
+
+    Args:
+        modularity_df (DataFrame): Must contain modularity values in columns like 'T1_matrix', 'T2_matrix', etc.
+        regression_info (DataFrame): Behavioral data with 'TimePoint', 'subject_id', and motor score columns.
+        tp (int): Timepoint to use (e.g., 1, 3, 4).
+        motor_test (str): Column name of the motor score to correlate.
+        corr_type (str): 'pearsonr' or 'spearmanr'.
+        z_thresh (float): Z-score threshold to detect outliers.
+
+    Returns:
+        r (float), p (float): Correlation coefficient and p-value.
+    """
+    tp_col = f"T{tp}_matrix"
+
+    if tp_col not in modularity_df.columns:
+        print(f"{tp_col} not found in modularity_df")
+        return None, None
+
+    regression_t = regression_info[
+        (regression_info["TimePoint"] == f"T{tp}") &
+        (regression_info["Behavioral_assessment"] == 1) &
+        (regression_info["MRI"] == 1)
+    ].copy()
+
+    if motor_test not in regression_t.columns:
+        print(f"Motor test '{motor_test}' not found in regression_info.")
+        return None, None
+
+    df = modularity_df.copy()
+    df["subject_id"] = df["subject_id"].astype(str)
+    regression_t["subject_id"] = regression_t["subject_id"].astype(str)
+
+    merged = df.merge(regression_t[["subject_id", motor_test]], on="subject_id")
+
+    modularity_scores = merged[tp_col].values
+    motor_scores = merged[motor_test].values
+
+    # Remove NaNs
+    valid = ~np.isnan(modularity_scores) & ~np.isnan(motor_scores)
+    modularity_clean = modularity_scores[valid]
+    motor_clean = motor_scores[valid]
+
+    # Set quantile thresholds
+    lower_q = 0.05
+    upper_q = 0.95
+
+    # Calculate quantile bounds
+    mod_low, mod_high = np.quantile(modularity_clean, [lower_q, upper_q])
+    motor_low, motor_high = np.quantile(motor_clean, [lower_q, upper_q])
+
+    # Keep only values within the quantile range for both variables
+    non_outliers = (
+        (modularity_clean >= mod_low) & (modularity_clean <= mod_high) &
+        (motor_clean >= motor_low) & (motor_clean <= motor_high)
+    )
+
+
+    mod_final = modularity_clean[non_outliers]
+    motor_final = motor_clean[non_outliers]
+
+    if len(mod_final) < 3:
+        print("Not enough valid data points after outlier removal.")
+        return None, None
+
+    # Correlation
+    if corr_type == 'pearsonr':
+        r, p = pearsonr(mod_final, motor_final)
+    elif corr_type == 'spearmanr':
+        r, p = spearmanr(mod_final, motor_final)
+    else:
+        raise ValueError("corr_type must be 'pearsonr' or 'spearmanr'")
+
+    # Plot
+    plt.figure(figsize=(6, 5))
+    sns.regplot(x=mod_final, y=motor_final)
+    plt.xlabel(f"{metric} (T{tp})")
+    plt.ylabel(f"{motor_test} (T{tp})")
+    plt.title(f"{corr_type.capitalize()}: {metric} vs {motor_test} at T{tp}, no outliers\n"
+              f"r = {r:.2f}, p = {p:.4f}")
+    plt.tight_layout()
+    plt.show()
+
+    return r, p
+
 
 
 ############################################## HEMISPHERIC SYMETRY ################################
