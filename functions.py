@@ -29,6 +29,10 @@ from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression, Ridge
 from scipy.stats import linregress
 from scipy.stats import zscore
+from scipy.stats import skew
+from statsmodels.stats.stattools import durbin_watson 
+from sklearn.neural_network import MLPRegressor
+
 
 
 # for prettiness <3
@@ -1374,7 +1378,7 @@ def compute_all_yeo_matrices_as_dataframe(matrices_df, region_to_yeo, rois, subs
             key_to_idx = {k: i for i, k in enumerate(key_list)}
             num_networks = len(key_list)
 
-            # Labels for this subject’s matrix
+            # Labels for this subject's matrix
             labels = [yeo_label_map[k] if k in yeo_label_map else str(k) for k in key_list]
             final_labels = labels  # update global labels with the latest one
 
@@ -1396,7 +1400,6 @@ def compute_all_yeo_matrices_as_dataframe(matrices_df, region_to_yeo, rois, subs
     df_out = df_out.set_index('subject_id').reindex(matrices_df['subject_id']).reset_index()
 
     return df_out, final_labels
-
 
 def plot_mean_yeo_matrices(all_yeo_matrices, labels):
 
@@ -2235,18 +2238,13 @@ def compute_mean_homotopic_fc(fc_df, pairs):
 
 ######################################## Regression #########################################
 
-def run_Ridge_with_RFE(X_df_clean, y, param_grid):
+def run_Ridge_with_RFE(X_df_clean, y, param_grid, motor_score_name=None, apply_log_transform=True, verbose=True):
     """
     Runs Ridge regression with Recursive Feature Elimination (RFE) and performs 
     grid search to select the optimal number of features based on cross-validated R² score.
-
-    This function:
-    - Standardizes input features using StandardScaler
-    - Applies RFE to select top features using Ridge regression as the estimator
-    - Performs a grid search over different numbers of features
-    - Evaluates performance using repeated K-Fold cross-validation
-    - Prints the best model configuration and top predictive features
-    - Returns the selected feature names and the fitted GridSearchCV object
+    
+    This function includes comprehensive data validation and handles skewed data with 
+    appropriate log transformations.
 
     Parameters
     ----------
@@ -2256,6 +2254,12 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
         Target variable (e.g., motor scores).
     param_grid : dict
         Dictionary defining the grid of 'rfe__n_features_to_select' values to search over.
+    motor_score_name : str, optional
+        Name of the motor score for logging purposes (e.g., 'nmf_motor', 'Fugl_Meyer_ipsi').
+    apply_log_transform : bool, default=True
+        Whether to apply log transformation based on data skewness.
+    verbose : bool, default=True
+        Whether to print detailed information about data validation and transformations.
 
     Returns
     -------
@@ -2263,6 +2267,10 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
         List of ROIxROI feature names selected by the best RFE model.
     grid : sklearn.model_selection.GridSearchCV
         Fitted GridSearchCV object containing the best estimator and CV results.
+    y_transformed : array-like
+        The transformed target variable (original if no transformation applied).
+    transformation_info : dict
+        Information about the applied transformations.
 
     Notes
     -----
@@ -2273,6 +2281,171 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
     Scoring metric: R² (coefficient of determination)
     """
     
+    # ===== DATA VALIDATION =====
+    if verbose:
+        print(f"=== Data Validation for {motor_score_name or 'target variable'} ===")
+    
+    # Check input types and shapes
+    if not isinstance(X_df_clean, pd.DataFrame):
+        raise TypeError("X_df_clean must be a pandas DataFrame")
+    
+    if not isinstance(y, (np.ndarray, pd.Series, list)):
+        raise TypeError("y must be an array-like object")
+    
+    # Convert y to numpy array for consistency
+    y = np.array(y)
+    
+    # Check for matching sample sizes
+    if len(y) != len(X_df_clean):
+        raise ValueError(f"Sample size mismatch: X has {len(X_df_clean)} samples, y has {len(y)} samples")
+    
+    # Check for sufficient samples
+    if len(y) < 10:
+        raise ValueError(f"Insufficient samples: {len(y)} samples. Need at least 10 for reliable cross-validation.")
+    
+    # Check for missing values
+    if np.any(np.isnan(y)):
+        raise ValueError("Target variable contains NaN values")
+    
+    if X_df_clean.isnull().any().any():
+        raise ValueError("Feature matrix contains NaN values")
+    
+    # Check for infinite values
+    if np.any(np.isinf(y)):
+        raise ValueError("Target variable contains infinite values")
+    
+    if np.any(np.isinf(X_df_clean.values)):
+        raise ValueError("Feature matrix contains infinite values")
+    
+    # Check for constant target variable
+    if np.std(y) == 0:
+        raise ValueError("Target variable is constant (zero variance)")
+    
+    # Check for constant features
+    constant_features = X_df_clean.columns[X_df_clean.std() == 0].tolist()
+    if constant_features:
+        if verbose:
+            print(f"Warning: {len(constant_features)} constant features found and will be removed")
+        X_df_clean = X_df_clean.drop(columns=constant_features)
+    
+    # Check for sufficient features after removing constants
+    if X_df_clean.shape[1] < 2:
+        raise ValueError(f"Insufficient features: {X_df_clean.shape[1]} features remaining after removing constants")
+    
+    # ===== DATA DISTRIBUTION ANALYSIS =====
+    if verbose:
+        print(f"\n=== Data Distribution Analysis ===")
+        print(f"Sample size: {len(y)}")
+        print(f"Number of features: {X_df_clean.shape[1]}")
+        print(f"Target variable range: [{y.min():.3f}, {y.max():.3f}]")
+        print(f"Target variable mean: {y.mean():.3f}")
+        print(f"Target variable std: {y.std():.3f}")
+    
+    # Calculate skewness
+    from scipy.stats import skew
+    y_skewness = skew(y)
+    
+    if verbose:
+        print(f"Target variable skewness: {y_skewness:.3f}")
+        if abs(y_skewness) > 1:
+            print(f"Data is {'right' if y_skewness > 0 else 'left'}-skewed (|skewness| > 1)")
+    
+    # ===== LOG TRANSFORMATION HANDLING =====
+    y_transformed = y.copy()
+    transformation_info = {
+        'original_skewness': y_skewness,
+        'transformation_applied': None,
+        'transformation_params': {}
+    }
+    
+    if apply_log_transform and abs(y_skewness) > 1:
+        # Determine transformation based on skewness and motor score type
+        if motor_score_name and 'nmf' in motor_score_name.lower():
+            # nmf_motor is typically right-skewed (many low values, few high values)
+            if y_skewness > 1:
+                # Apply log transformation for right-skewed data
+                y_transformed = np.log1p(y)  # log1p(y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p',
+                    'transformation_params': {}
+                })
+                if verbose:
+                    print(f"Applied log1p(y) transformation for right-skewed nmf_motor data")
+            else:
+                if verbose:
+                    print(f"No transformation applied: nmf_motor data not sufficiently right-skewed")
+        
+        elif motor_score_name and 'fugl' in motor_score_name.lower():
+            # Fugl Meyer is typically left-skewed (many high values, few low values)
+            if y_skewness < -1:
+                # Apply log transformation for left-skewed data
+                y_transformed = np.log1p(y.max() - y)  # log1p(max - y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p_reverse',
+                    'transformation_params': {'max_value': y.max()}
+                })
+                if verbose:
+                    print(f"Applied log1p(max - y) transformation for left-skewed Fugl Meyer data")
+            else:
+                if verbose:
+                    print(f"No transformation applied: Fugl Meyer data not sufficiently left-skewed")
+        
+        else:
+            # Generic transformation based on skewness
+            if y_skewness > 1:
+                y_transformed = np.log1p(y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p',
+                    'transformation_params': {}
+                })
+                if verbose:
+                    print(f"Applied log1p(y) transformation for right-skewed data")
+            elif y_skewness < -1:
+                y_transformed = np.log1p(y.max() - y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p_reverse',
+                    'transformation_params': {'max_value': y.max()}
+                })
+                if verbose:
+                    print(f"Applied log1p(max - y) transformation for left-skewed data")
+    
+    # Check transformed data
+    if np.any(np.isnan(y_transformed)) or np.any(np.isinf(y_transformed)):
+        raise ValueError("Transformation resulted in NaN or infinite values")
+    
+    if np.std(y_transformed) == 0:
+        raise ValueError("Transformed target variable is constant (zero variance)")
+    
+    if verbose:
+        transformed_skewness = skew(y_transformed)
+        print(f"Transformed data skewness: {transformed_skewness:.3f}")
+        print(f"Transformation applied: {transformation_info['transformation_applied']}")
+    
+    # ===== PARAMETER GRID VALIDATION =====
+    if verbose:
+        print(f"\n=== Parameter Grid Validation ===")
+    
+    max_features = X_df_clean.shape[1]
+    if 'rfe__n_features_to_select' in param_grid:
+        feature_counts = param_grid['rfe__n_features_to_select']
+        # Ensure no feature count exceeds available features
+        valid_feature_counts = [f for f in feature_counts if f <= max_features]
+        if len(valid_feature_counts) != len(feature_counts):
+            removed_counts = [f for f in feature_counts if f > max_features]
+            if verbose:
+                print(f"Warning: Removed invalid feature counts: {removed_counts}")
+            param_grid['rfe__n_features_to_select'] = valid_feature_counts
+        
+        if not valid_feature_counts:
+            raise ValueError(f"No valid feature counts in parameter grid. Max available: {max_features}")
+        
+        if verbose:
+            print(f"Valid feature counts: {valid_feature_counts}")
+    
+    # ===== MODEL TRAINING =====
+    if verbose:
+        print(f"\n=== Model Training ===")
+    
     pipe = Pipeline([
         ("scaler", StandardScaler()),
         ("rfe", RFE(estimator=Ridge(alpha=1.0))),
@@ -2280,25 +2453,33 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
     ])
     cv = RepeatedKFold(n_splits=5, n_repeats=10, random_state=42)
 
-    grid = GridSearchCV(pipe, param_grid, cv=cv, scoring='r2')
-    grid.fit(X_df_clean, y)
+    try:
+        grid = GridSearchCV(pipe, param_grid, cv=cv, scoring='r2', n_jobs=-1)
+        grid.fit(X_df_clean, y_transformed)
+    except Exception as e:
+        raise RuntimeError(f"Model training failed: {str(e)}")
+    
+    # ===== RESULTS ANALYSIS =====
+    if verbose:
+        print(f"\n=== Results ===")
+        print(f"Best number of features: {grid.best_params_['rfe__n_features_to_select']}")
+        print(f"Best cross-validated R² score: {grid.best_score_:.3f}")
+        
+        # Check for convergence issues
+        if grid.best_score_ < 0:
+            print(f"Warning: Negative R² score ({grid.best_score_:.3f}) indicates poor model performance")
+        
+        if grid.best_score_ < 0.1:
+            print(f"Warning: Low R² score ({grid.best_score_:.3f}) suggests limited predictive power")
 
-    # Step 6: Results
-    print("Best number of features:", grid.best_params_['rfe__n_features_to_select'])
-    print("Best cross-validated R² score:", grid.best_score_)
-
-    # Step 7: Feature interpretation
+    # ===== FEATURE INTERPRETATION =====
     best_rfe = grid.best_estimator_.named_steps['rfe']
     support = best_rfe.support_
-    #selected_features = np.array(feature_names)[support]
 
-    # To get indices of selected features:
+    # Get selected feature names
     selected_indices = [i for i, keep in enumerate(support) if keep]
-    # Get all feature names from X_df_clean
     all_feature_names = X_df_clean.columns.tolist()
-    # Get the names of the selected features
     selected_feature_names = [all_feature_names[i] for i in selected_indices]
-    #print("Selected feature names:", selected_feature_names)
 
     best_ridge = grid.best_estimator_.named_steps['ridge']
     coefficients = best_ridge.coef_
@@ -2309,11 +2490,41 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid):
         "Weight": coefficients
     }).sort_values(by="Weight", key=np.abs, ascending=False)
 
-    print("Top predictive features:")
-    print(feature_importance.head(10))
+    if verbose:
+        print(f"\nTop predictive features:")
+        print(feature_importance.head(10))
+        
+        # Check for potential overfitting
+        if len(selected_feature_names) > len(y) * 0.1:  # More than 10% of sample size
+            print(f"Warning: {len(selected_feature_names)} features selected for {len(y)} samples - risk of overfitting")
     
-    return selected_feature_names, grid
+    return selected_feature_names, grid, y_transformed, transformation_info
 
+
+
+def reverse_transform_predictions(y_pred_transformed, transformation_info):
+    """
+    Reverse transform predictions back to original scale.
+    
+    Parameters
+    ----------
+    y_pred_transformed : array-like
+        Predictions in transformed space.
+    transformation_info : dict
+        Information about the applied transformation.
+        
+    Returns
+    -------
+    array-like
+        Predictions in original scale.
+    """
+    if transformation_info['transformation_applied'] == 'log1p':
+        return np.expm1(y_pred_transformed)
+    elif transformation_info['transformation_applied'] == 'log1p_reverse':
+        max_value = transformation_info['transformation_params']['max_value']
+        return max_value - np.expm1(y_pred_transformed)
+    else:
+        return y_pred_transformed
 
 
 def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None, param_grid=None):
@@ -2355,114 +2566,1583 @@ def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_scor
     
     '''if param_grid is None:
         param_grid = {
-        "rfe__n_features_to_select": [5, 10, 17, 18, 19, 20, 21, 22, 23, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
+        "rfe__n_features_to_select": [5, 10, 20, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
         }'''
     
     param_grid = {
-        "rfe__n_features_to_select": [5, 10, 17, 18, 19, 20, 21, 22, 23, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
+        "rfe__n_features_to_select": [5, 10, 20, 24, 30, 40, 80, 160, X_df_clean.shape[1]]
     }
     
     y = valid_data[motor_score].values
     
     return X_df_clean, y, param_grid
 
-def run_whole_pipeline(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None):
+def run_whole_pipeline(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None, apply_log_transform=True, verbose=True):
     """
-    Run the whole pipeline for feature selection and model training.
+    Run the whole pipeline for feature selection and model training with comprehensive validation.
+    
+    Parameters
+    ----------
+    df_aligned : pandas.DataFrame
+        DataFrame containing aligned functional connectivity matrices.
+    regression_info : pandas.DataFrame
+        DataFrame containing regression information and motor scores.
+    tp : int, default=3
+        Time point to analyze (1, 2, 3, or 4).
+    motor_score : str, default='Fugl_Meyer_ipsi'
+        Name of the motor score column to predict.
+    striatum_labels : list, optional
+        List of striatum ROI labels to include in the analysis.
+    apply_log_transform : bool, default=True
+        Whether to apply log transformation based on data skewness.
+    verbose : bool, default=True
+        Whether to print detailed information about the pipeline.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing results including selected features, model, and performance metrics.
     """
     
-    X_df_clean, y, param_grid = preprocess_data_for_regression(df_aligned, regression_info, tp, motor_score, striatum_labels)
-
-    selected_feature_names, grid = run_Ridge_with_RFE(X_df_clean, y, param_grid)
+    if verbose:
+        print(f"=== Running Whole Pipeline ===")
+        print(f"Time point: T{tp}")
+        print(f"Motor score: {motor_score}")
+        print(f"Striatum labels: {len(striatum_labels) if striatum_labels else 'None'}")
     
-    # Step 1: Predict with the best model on all data
-    y_pred = grid.best_estimator_.predict(X_df_clean)
-
-    # Step 2: Evaluate performance
-    r2 = r2_score(y, y_pred)
-    mse = mean_squared_error(y, y_pred)
-    mae = mean_absolute_error(y, y_pred)
-
-    print(f"R² on full data: {r2:.3f}")
-    print(f"Mean Squared Error: {mse:.3f}")
-    print(f"Mean Absolute Error: {mae:.3f}")
+    # Step 1: Preprocess data
+    try:
+        X_df_clean, y, param_grid = preprocess_data_for_regression(df_aligned, regression_info, tp, motor_score, striatum_labels)
+        if verbose:
+            print(f"Data preprocessing completed: {X_df_clean.shape[0]} samples, {X_df_clean.shape[1]} features")
+    except Exception as e:
+        raise RuntimeError(f"Data preprocessing failed: {str(e)}")
     
-    print("Plotting data distribution and predictions for", motor_score, "at time point T", tp)
-
-    plt.figure(figsize=(6, 6))
-    plt.scatter(y, y_pred, edgecolor='k')
-    plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=2)
-    plt.xlabel("True motor scores")
-    plt.ylabel("Predicted motor scores")
-    plt.title("True vs. Predicted")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    # Step 2: Run Ridge regression with RFE
+    try:
+        selected_feature_names, grid, y_transformed, transformation_info = run_Ridge_with_RFE(
+            X_df_clean, y, param_grid, 
+            motor_score_name=motor_score,
+            apply_log_transform=apply_log_transform,
+            verbose=verbose
+        )
+        if verbose:
+            print(f"Model training completed successfully")
+    except Exception as e:
+        raise RuntimeError(f"Model training failed: {str(e)}")
     
-    sns.histplot(y, kde=True)
-    plt.title("Distribution of y")
-    plt.show()
-
-
-    y_sorted = np.sort(y)
-    cdf = 1.0 - np.arange(1, len(y_sorted) + 1) / len(y_sorted)
+    # Step 3: Predict with the best model on all data
+    try:
+        y_pred_transformed = grid.best_estimator_.predict(X_df_clean)
+        
+        # Reverse transform predictions if transformation was applied
+        y_pred = reverse_transform_predictions(y_pred_transformed, transformation_info)
+        
+        if verbose:
+            print(f"Predictions generated successfully")
+    except Exception as e:
+        raise RuntimeError(f"Prediction generation failed: {str(e)}")
     
-    print("Plotting CDF for", motor_score, "at time point T", tp, ", min/max:", y.min(), y.max())
-
-    plt.figure(figsize=(6, 5))
-    plt.loglog(y_sorted, cdf, marker='o', linestyle='none')
-    plt.xlabel(f"y ({motor_score} scores)")
-    plt.ylabel("1 - CDF (log-log)")
-    plt.title(f"Log-Log CDF Plot of {motor_score} Scores")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    # Step 4: Evaluate performance
+    try:
+        # Evaluate on transformed space for consistency
+        r2_transformed = r2_score(y_transformed, y_pred_transformed)
+        mse_transformed = mean_squared_error(y_transformed, y_pred_transformed)
+        mae_transformed = mean_absolute_error(y_transformed, y_pred_transformed)
+        
+        # Also evaluate on original space
+        r2_original = r2_score(y, y_pred)
+        mse_original = mean_squared_error(y, y_pred)
+        mae_original = mean_absolute_error(y, y_pred)
+        
+        if verbose:
+            print(f"\n=== Performance Metrics ===")
+            print(f"Transformed space - R²: {r2_transformed:.3f}, MSE: {mse_transformed:.3f}, MAE: {mae_transformed:.3f}")
+            print(f"Original space - R²: {r2_original:.3f}, MSE: {mse_original:.3f}, MAE: {mae_original:.3f}")
+    except Exception as e:
+        raise RuntimeError(f"Performance evaluation failed: {str(e)}")
     
-    print("Plotting histogram with log-scaled y-axis for", motor_score, "at time point T", tp, "to check for right-skewed distribution")
-
-    sns.histplot(y, bins=30, log_scale=(False, True))
-    plt.title("Histogram with Log-Scaled Y-Axis of " + motor_score)
-    plt.xlabel("Motor scores")
-    plt.ylabel("Log frequency")
-    plt.show()
+    # Step 5: Create visualizations
+    if verbose:
+        try:
+            print(f"\n=== Creating Visualizations ===")
+            
+            # Plot 1: True vs Predicted (original space)
+            plt.figure(figsize=(12, 5))
+            
+            plt.subplot(1, 2, 1)
+            plt.scatter(y, y_pred, edgecolor='k', alpha=0.7)
+            plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=2)
+            plt.xlabel("True motor scores")
+            plt.ylabel("Predicted motor scores")
+            plt.title(f"True vs. Predicted ({motor_score})")
+            plt.grid(True, alpha=0.3)
+            
+            # Plot 2: True vs Predicted (transformed space)
+            plt.subplot(1, 2, 2)
+            plt.scatter(y_transformed, y_pred_transformed, edgecolor='k', alpha=0.7)
+            plt.plot([y_transformed.min(), y_transformed.max()], 
+                    [y_transformed.min(), y_transformed.max()], 'r--', lw=2)
+            plt.xlabel("True motor scores (transformed)")
+            plt.ylabel("Predicted motor scores (transformed)")
+            plt.title(f"True vs. Predicted (transformed)")
+            plt.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
+            
+            # Plot 3: Distribution comparison
+            plt.figure(figsize=(15, 5))
+            
+            plt.subplot(1, 3, 1)
+            sns.histplot(y, kde=True, bins=20)
+            plt.title(f"Original {motor_score} Distribution")
+            plt.xlabel("Motor scores")
+            
+            plt.subplot(1, 3, 2)
+            sns.histplot(y_transformed, kde=True, bins=20)
+            plt.title(f"Transformed {motor_score} Distribution")
+            plt.xlabel("Motor scores (transformed)")
+            
+            plt.subplot(1, 3, 3)
+            sns.histplot(y_pred, kde=True, bins=20, color='orange', alpha=0.7)
+            plt.title(f"Predicted {motor_score} Distribution")
+            plt.xlabel("Predicted motor scores")
+            
+            plt.tight_layout()
+            plt.show()
+            
+            # Plot 4: Residuals
+            plt.figure(figsize=(12, 5))
+            
+            residuals_original = y - y_pred
+            residuals_transformed = y_transformed - y_pred_transformed
+            
+            plt.subplot(1, 2, 1)
+            plt.scatter(y_pred, residuals_original, alpha=0.7)
+            plt.axhline(y=0, color='r', linestyle='--')
+            plt.xlabel("Predicted values")
+            plt.ylabel("Residuals")
+            plt.title("Residuals vs Predicted (Original)")
+            plt.grid(True, alpha=0.3)
+            
+            plt.subplot(1, 2, 2)
+            plt.scatter(y_pred_transformed, residuals_transformed, alpha=0.7)
+            plt.axhline(y=0, color='r', linestyle='--')
+            plt.xlabel("Predicted values (transformed)")
+            plt.ylabel("Residuals (transformed)")
+            plt.title("Residuals vs Predicted (Transformed)")
+            plt.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
+            
+        except Exception as e:
+            print(f"Warning: Visualization creation failed: {str(e)}")
     
-    print("Plotting histogram of log1p(max - y) for", motor_score, "at time point T", tp, "to check for left-skewed distribution")
+    # Step 6: Compile results
+    results = {
+        'selected_features': selected_feature_names,
+        'model': grid,
+        'transformation_info': transformation_info,
+        'performance': {
+            'transformed_space': {
+                'r2': r2_transformed,
+                'mse': mse_transformed,
+                'mae': mae_transformed
+            },
+            'original_space': {
+                'r2': r2_original,
+                'mse': mse_original,
+                'mae': mae_original
+            }
+        },
+        'predictions': {
+            'y_true': y,
+            'y_pred': y_pred,
+            'y_true_transformed': y_transformed,
+            'y_pred_transformed': y_pred_transformed
+        },
+        'data_info': {
+            'n_samples': len(y),
+            'n_features': X_df_clean.shape[1],
+            'n_selected_features': len(selected_feature_names),
+            'motor_score': motor_score,
+            'time_point': tp
+        }
+    }
     
-    y_reflected_log = np.log1p(y.max() - y)
-    plt.figure(figsize=(6, 6))
-    sns.histplot(y_reflected_log, kde=True)
-    plt.title(f"Histogram of log1p(max - y) for {motor_score}")
-    plt.xlabel("log1p(max - y)")
-    plt.ylabel("Frequency")
-    plt.show()
+    if verbose:
+        print(f"\n=== Pipeline Summary ===")
+        print(f"Selected {len(selected_feature_names)} features from {X_df_clean.shape[1]} total features")
+        print(f"Best R² score: {grid.best_score_:.3f}")
+        print(f"Transformation applied: {transformation_info['transformation_applied']}")
+        print(f"Pipeline completed successfully!")
     
-    print("Running Ridge regression with RFE on reflected log-transformed y for", motor_score, "at time point T", tp)
-
-    selected_feature_names, grid = run_Ridge_with_RFE(X_df_clean, y_reflected_log, param_grid)
-    
-    
-    print("Running Ridge regression with RFE on log-transformed y for", motor_score, "at time point T", tp)
-    
-    # Shift y if needed to avoid log(0)
-    y_transformed = np.log1p(y)  # log(1 + y)
-    
-    selected_feature_names, grid = run_Ridge_with_RFE(X_df_clean, y_transformed, param_grid)
-    
-    #### Random Forst Regression
-    
-    print("Running Random Forest regression with cross-validation for", motor_score, "at time point T", tp)
-    
-    # Pipeline: standardize, then fit Random Forest
-    pipe = Pipeline([
-        ("scaler", StandardScaler()),  # optional, not always needed for RF
-        ("rf", RandomForestRegressor(n_estimators=100, random_state=42))
-    ])
-
-    # Cross-validation
-    cv = RepeatedKFold(n_splits=5, n_repeats=10, random_state=42)
-    scores = cross_val_score(pipe, X_df_clean, y, cv=cv, scoring='r2')
-    print("Random Forest R² (CV):", scores.mean())
-    
-    return selected_feature_names, grid
+    return results
 
 # I have to think about what I want to return !!
+
+
+def demonstrate_improved_regression_pipeline(df_aligned, regression_info, striatum_labels=None):
+    """
+    Demonstrate the improved regression pipeline with comprehensive validation and log transformations.
+    
+    This function shows how to use the improved run_Ridge_with_RFE and run_whole_pipeline functions
+    with proper data validation and handling of skewed data.
+    
+    Parameters
+    ----------
+    df_aligned : pandas.DataFrame
+        DataFrame containing aligned functional connectivity matrices.
+    regression_info : pandas.DataFrame
+        DataFrame containing regression information and motor scores.
+    striatum_labels : list, optional
+        List of striatum ROI labels to include in the analysis.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing results for all motor scores and time points.
+    """
+    
+    print("=== Demonstrating Improved Regression Pipeline ===")
+    print("This pipeline includes:")
+    print("1. Comprehensive data validation")
+    print("2. Automatic skewness detection")
+    print("3. Appropriate log transformations for skewed data")
+    print("4. Proper error handling and informative messages")
+    print("5. Detailed performance metrics and visualizations")
+    print()
+    
+    # Define motor scores to analyze
+    motor_scores = ['nmf_motor', 'Fugl_Meyer_ipsi', 'Fugl_Meyer_contra']
+    time_points = [3, 4]  # T3 and T4
+    
+    all_results = {}
+    
+    for motor_score in motor_scores:
+        print(f"\n{'='*60}")
+        print(f"Analyzing {motor_score}")
+        print(f"{'='*60}")
+        
+        all_results[motor_score] = {}
+        
+        for tp in time_points:
+            print(f"\n--- Time Point T{tp} ---")
+            
+            try:
+                # Run the improved pipeline
+                results = run_whole_pipeline(
+                    df_aligned=df_aligned,
+                    regression_info=regression_info,
+                    tp=tp,
+                    motor_score=motor_score,
+                    striatum_labels=striatum_labels,
+                    apply_log_transform=True,
+                    verbose=True
+                )
+                
+                all_results[motor_score][f'T{tp}'] = results
+                
+                # Print summary
+                print(f"\nSummary for {motor_score} at T{tp}:")
+                print(f"  - Original R²: {results['performance']['original_space']['r2']:.3f}")
+                print(f"  - Transformed R²: {results['performance']['transformed_space']['r2']:.3f}")
+                print(f"  - Features selected: {results['data_info']['n_selected_features']}")
+                print(f"  - Transformation: {results['transformation_info']['transformation_applied']}")
+                
+            except Exception as e:
+                print(f"Error analyzing {motor_score} at T{tp}: {str(e)}")
+                all_results[motor_score][f'T{tp}'] = {'error': str(e)}
+    
+    # Print overall summary
+    print(f"\n{'='*60}")
+    print("OVERALL SUMMARY")
+    print(f"{'='*60}")
+    
+    for motor_score in motor_scores:
+        print(f"\n{motor_score}:")
+        for tp in time_points:
+            tp_key = f'T{tp}'
+            if tp_key in all_results[motor_score]:
+                if 'error' in all_results[motor_score][tp_key]:
+                    print(f"  T{tp}: ERROR - {all_results[motor_score][tp_key]['error']}")
+                else:
+                    r2_orig = all_results[motor_score][tp_key]['performance']['original_space']['r2']
+                    r2_trans = all_results[motor_score][tp_key]['performance']['transformed_space']['r2']
+                    transform = all_results[motor_score][tp_key]['transformation_info']['transformation_applied']
+                    n_features = all_results[motor_score][tp_key]['data_info']['n_selected_features']
+                    print(f"  T{tp}: R²={r2_orig:.3f} (orig), R²={r2_trans:.3f} (trans), {transform}, {n_features} features")
+    
+    return all_results
+
+def run_neural_network_regression(X_df_clean, y, motor_score_name=None, apply_log_transform=True, verbose=True, 
+                                 hidden_layer_sizes=(100, 50), max_iter=1000, random_state=42, 
+                                 create_plots=False, save_plots_dir=None):
+    """
+    Runs Neural Network regression with comprehensive data validation and log transformations.
+    
+    Parameters
+    ----------
+    X_df_clean : pandas.DataFrame
+        DataFrame of shape (n_samples, n_features) containing preprocessed features.
+    y : array-like of shape (n_samples,)
+        Target variable (e.g., motor scores).
+    motor_score_name : str, optional
+        Name of the motor score for logging purposes.
+    apply_log_transform : bool, default=True
+        Whether to apply log transformation based on data skewness.
+    verbose : bool, default=True
+        Whether to print detailed information.
+    hidden_layer_sizes : tuple, default=(100, 50)
+        Hidden layer sizes for the neural network.
+    max_iter : int, default=1000
+        Maximum iterations for training.
+    random_state : int, default=42
+        Random state for reproducibility.
+    create_plots : bool, default=False
+        Whether to create diagnostic plots.
+    save_plots_dir : str, optional
+        Directory to save plots if create_plots=True.
+    
+    Returns
+    -------
+    model : sklearn.neural_network.MLPRegressor
+        Fitted neural network model.
+    y_transformed : array-like
+        The transformed target variable.
+    transformation_info : dict
+        Information about the applied transformations.
+    r2_transformed : float
+        R^2 score on the transformed scale.
+    r2_original : float
+        R^2 score on the original scale (if possible).
+    y_pred : array-like
+        Predictions on original scale (if possible) or transformed scale.
+    y_pred_transformed : array-like
+        Predictions on transformed scale.
+    """
+    
+    # ===== DATA VALIDATION (same as Ridge function) =====
+    if verbose:
+        print(f"=== Neural Network Regression for {motor_score_name or 'target variable'} ===")
+    
+    # Check input types and shapes
+    if not isinstance(X_df_clean, pd.DataFrame):
+        raise TypeError("X_df_clean must be a pandas DataFrame")
+    
+    if not isinstance(y, (np.ndarray, pd.Series, list)):
+        raise TypeError("y must be an array-like object")
+    
+    y = np.array(y)
+    
+    # Check for matching sample sizes
+    if len(y) != len(X_df_clean):
+        raise ValueError(f"Sample size mismatch: X has {len(X_df_clean)} samples, y has {len(y)} samples")
+    
+    # Check for sufficient samples
+    if len(y) < 10:
+        raise ValueError(f"Insufficient samples: {len(y)} samples. Need at least 10 for reliable training.")
+    
+    # Check for missing values
+    if np.any(np.isnan(y)) or X_df_clean.isnull().any().any():
+        raise ValueError("Data contains NaN values")
+    
+    # Check for infinite values
+    if np.any(np.isinf(y)) or np.any(np.isinf(X_df_clean.values)):
+        raise ValueError("Data contains infinite values")
+    
+    # Check for constant target variable
+    if np.std(y) == 0:
+        raise ValueError("Target variable is constant (zero variance)")
+    
+    # Remove constant features
+    constant_features = X_df_clean.columns[X_df_clean.std() == 0].tolist()
+    if constant_features:
+        if verbose:
+            print(f"Warning: {len(constant_features)} constant features found and will be removed")
+        X_df_clean = X_df_clean.drop(columns=constant_features)
+    
+    if X_df_clean.shape[1] < 2:
+        raise ValueError(f"Insufficient features: {X_df_clean.shape[1]} features remaining")
+    
+    # ===== DATA DISTRIBUTION ANALYSIS =====
+    if verbose:
+        print(f"\n=== Data Distribution Analysis ===")
+        print(f"Sample size: {len(y)}")
+        print(f"Number of features: {X_df_clean.shape[1]}")
+        print(f"Target variable range: [{y.min():.3f}, {y.max():.3f}]")
+        print(f"Target variable mean: {y.mean():.3f}")
+        print(f"Target variable std: {y.std():.3f}")
+    
+    # Calculate skewness
+    y_skewness = skew(y)
+    
+    if verbose:
+        print(f"Target variable skewness: {y_skewness:.3f}")
+        if abs(y_skewness) > 1:
+            print(f"Data is {'right' if y_skewness > 0 else 'left'}-skewed (|skewness| > 1)")
+    
+    # ===== LOG TRANSFORMATION HANDLING =====
+    y_transformed = y.copy()
+    transformation_info = {
+        'original_skewness': y_skewness,
+        'transformation_applied': None,
+        'transformation_params': {}
+    }
+    
+    if apply_log_transform and abs(y_skewness) > 1:
+        # Determine transformation based on skewness and motor score type
+        if motor_score_name and 'nmf' in motor_score_name.lower():
+            # nmf_motor is typically right-skewed (many low values, few high values)
+            if y_skewness > 1:
+                y_transformed = np.log1p(y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p',
+                    'transformation_params': {}
+                })
+                if verbose:
+                    print(f"Applied log1p(y) transformation for right-skewed nmf_motor data")
+        
+        elif motor_score_name and 'fugl' in motor_score_name.lower():
+            # Fugl Meyer is typically left-skewed (many high values, few low values)
+            if y_skewness < -1:
+                y_transformed = np.log1p(y.max() - y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p_reverse',
+                    'transformation_params': {'max_value': y.max()}
+                })
+                if verbose:
+                    print(f"Applied log1p(max - y) transformation for left-skewed Fugl Meyer data")
+        
+        else:
+            # Generic transformation based on skewness
+            if y_skewness > 1:
+                y_transformed = np.log1p(y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p',
+                    'transformation_params': {}
+                })
+            elif y_skewness < -1:
+                y_transformed = np.log1p(y.max() - y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p_reverse',
+                    'transformation_params': {'max_value': y.max()}
+                })
+    
+    # Check transformed data
+    if np.any(np.isnan(y_transformed)) or np.any(np.isinf(y_transformed)):
+        raise ValueError("Transformation resulted in NaN or infinite values")
+    
+    if np.std(y_transformed) == 0:
+        raise ValueError("Transformed target variable is constant (zero variance)")
+    
+    if verbose:
+        transformed_skewness = skew(y_transformed)
+        print(f"Transformed data skewness: {transformed_skewness:.3f}")
+        print(f"Transformation applied: {transformation_info['transformation_applied']}")
+    
+    # ===== MODEL TRAINING =====
+    if verbose:
+        print(f"\n=== Neural Network Training ===")
+    
+    # Create pipeline with scaling and neural network
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("mlp", MLPRegressor(
+            hidden_layer_sizes=hidden_layer_sizes,
+            max_iter=max_iter,
+            random_state=random_state,
+            early_stopping=True,
+            validation_fraction=0.1
+        ))
+    ])
+    
+    # Cross-validation
+    cv = RepeatedKFold(n_splits=5, n_repeats=5, random_state=random_state)
+    
+    try:
+        scores = cross_val_score(pipe, X_df_clean, y_transformed, cv=cv, scoring='r2')
+        if verbose:
+            print(f"Cross-validation R² scores: {scores}")
+            print(f"Mean CV R²: {scores.mean():.3f} ± {scores.std():.3f}")
+        
+        # Fit the model on all data
+        pipe.fit(X_df_clean, y_transformed)
+        model = pipe
+        
+        # Predict on training data
+        y_pred_transformed = model.predict(X_df_clean)
+        # R^2 on transformed scale
+        from sklearn.metrics import r2_score
+        r2_transformed = r2_score(y_transformed, y_pred_transformed)
+        # R^2 on original scale (if possible)
+        try:
+            y_pred = reverse_transform_predictions(y_pred_transformed, transformation_info)
+            r2_original = r2_score(y, y_pred)
+        except Exception:
+            y_pred = y_pred_transformed
+            r2_original = None
+        if verbose:
+            print(f"R² on transformed scale: {r2_transformed:.3f}")
+            if r2_original is not None:
+                print(f"R² on original scale: {r2_original:.3f}")
+            else:
+                print("R² on original scale: Could not compute (reverse transform failed)")
+        
+        # Permutation importance for top 5 predictors
+        from sklearn.inspection import permutation_importance
+        result = permutation_importance(model, X_df_clean, y_transformed, n_repeats=10, random_state=random_state, scoring='r2')
+        importances = result.importances_mean
+        feature_names = X_df_clean.columns
+        top_indices = importances.argsort()[::-1][:5]
+        print("Top 5 predictors (by permutation importance):")
+        for idx in top_indices:
+            print(f"  {feature_names[idx]}: {importances[idx]:.4f}")
+        
+        if verbose:
+            print(f"Neural network training completed successfully")
+        
+        # ===== CREATE PLOTS IF REQUESTED =====
+        if create_plots:
+            if verbose:
+                print(f"\n=== Creating Diagnostic Plots ===")
+            
+            # Create diagnostic report
+            diagnostic_report = create_neural_network_diagnostic_report(
+                model, X_df_clean, y, y_transformed, transformation_info, 
+                motor_score_name, save_dir=save_plots_dir
+            )
+            
+            if verbose:
+                print("Diagnostic plots created successfully!")
+            
+    except Exception as e:
+        raise RuntimeError(f"Neural network training failed: {str(e)}")
+    
+    return model, y_transformed, transformation_info, r2_transformed, r2_original, y_pred, y_pred_transformed
+
+
+def run_random_forest_regression(X_df_clean, y, motor_score_name=None, apply_log_transform=True, verbose=True,
+                                n_estimators=100, max_depth=None, random_state=42):
+    """
+    Runs Random Forest regression with comprehensive data validation and log transformations.
+    
+    Parameters
+    ----------
+    X_df_clean : pandas.DataFrame
+        DataFrame of shape (n_samples, n_features) containing preprocessed features.
+    y : array-like of shape (n_samples,)
+        Target variable (e.g., motor scores).
+    motor_score_name : str, optional
+        Name of the motor score for logging purposes.
+    apply_log_transform : bool, default=True
+        Whether to apply log transformation based on data skewness.
+    verbose : bool, default=True
+        Whether to print detailed information.
+    n_estimators : int, default=100
+        Number of trees in the forest.
+    max_depth : int, optional
+        Maximum depth of trees.
+    random_state : int, default=42
+        Random state for reproducibility.
+    
+    Returns
+    -------
+    model : sklearn.ensemble.RandomForestRegressor
+        Fitted random forest model.
+    y_transformed : array-like
+        The transformed target variable.
+    transformation_info : dict
+        Information about the applied transformations.
+    feature_importance : pandas.DataFrame
+        Feature importance scores.
+    """
+    
+    # ===== DATA VALIDATION (same as other functions) =====
+    if verbose:
+        print(f"=== Random Forest Regression for {motor_score_name or 'target variable'} ===")
+    
+    # Check input types and shapes
+    if not isinstance(X_df_clean, pd.DataFrame):
+        raise TypeError("X_df_clean must be a pandas DataFrame")
+    
+    if not isinstance(y, (np.ndarray, pd.Series, list)):
+        raise TypeError("y must be an array-like object")
+    
+    y = np.array(y)
+    
+    # Check for matching sample sizes
+    if len(y) != len(X_df_clean):
+        raise ValueError(f"Sample size mismatch: X has {len(X_df_clean)} samples, y has {len(y)} samples")
+    
+    # Check for sufficient samples
+    if len(y) < 10:
+        raise ValueError(f"Insufficient samples: {len(y)} samples. Need at least 10 for reliable training.")
+    
+    # Check for missing values
+    if np.any(np.isnan(y)) or X_df_clean.isnull().any().any():
+        raise ValueError("Data contains NaN values")
+    
+    # Check for infinite values
+    if np.any(np.isinf(y)) or np.any(np.isinf(X_df_clean.values)):
+        raise ValueError("Data contains infinite values")
+    
+    # Check for constant target variable
+    if np.std(y) == 0:
+        raise ValueError("Target variable is constant (zero variance)")
+    
+    # Remove constant features
+    constant_features = X_df_clean.columns[X_df_clean.std() == 0].tolist()
+    if constant_features:
+        if verbose:
+            print(f"Warning: {len(constant_features)} constant features found and will be removed")
+        X_df_clean = X_df_clean.drop(columns=constant_features)
+    
+    if X_df_clean.shape[1] < 2:
+        raise ValueError(f"Insufficient features: {X_df_clean.shape[1]} features remaining")
+    
+    # ===== DATA DISTRIBUTION ANALYSIS =====
+    if verbose:
+        print(f"\n=== Data Distribution Analysis ===")
+        print(f"Sample size: {len(y)}")
+        print(f"Number of features: {X_df_clean.shape[1]}")
+        print(f"Target variable range: [{y.min():.3f}, {y.max():.3f}]")
+        print(f"Target variable mean: {y.mean():.3f}")
+        print(f"Target variable std: {y.std():.3f}")
+    
+    # Calculate skewness
+    y_skewness = skew(y)
+    
+    if verbose:
+        print(f"Target variable skewness: {y_skewness:.3f}")
+        if abs(y_skewness) > 1:
+            print(f"Data is {'right' if y_skewness > 0 else 'left'}-skewed (|skewness| > 1)")
+    
+    # ===== LOG TRANSFORMATION HANDLING =====
+    y_transformed = y.copy()
+    transformation_info = {
+        'original_skewness': y_skewness,
+        'transformation_applied': None,
+        'transformation_params': {}
+    }
+    
+    if apply_log_transform and abs(y_skewness) > 1:
+        # Determine transformation based on skewness and motor score type
+        if motor_score_name and 'nmf' in motor_score_name.lower():
+            # nmf_motor is typically right-skewed (many low values, few high values)
+            if y_skewness > 1:
+                y_transformed = np.log1p(y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p',
+                    'transformation_params': {}
+                })
+                if verbose:
+                    print(f"Applied log1p(y) transformation for right-skewed nmf_motor data")
+        
+        elif motor_score_name and 'fugl' in motor_score_name.lower():
+            # Fugl Meyer is typically left-skewed (many high values, few low values)
+            if y_skewness < -1:
+                y_transformed = np.log1p(y.max() - y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p_reverse',
+                    'transformation_params': {'max_value': y.max()}
+                })
+                if verbose:
+                    print(f"Applied log1p(max - y) transformation for left-skewed Fugl Meyer data")
+        
+        else:
+            # Generic transformation based on skewness
+            if y_skewness > 1:
+                y_transformed = np.log1p(y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p',
+                    'transformation_params': {}
+                })
+            elif y_skewness < -1:
+                y_transformed = np.log1p(y.max() - y)
+                transformation_info.update({
+                    'transformation_applied': 'log1p_reverse',
+                    'transformation_params': {'max_value': y.max()}
+                })
+    
+    # Check transformed data
+    if np.any(np.isnan(y_transformed)) or np.any(np.isinf(y_transformed)):
+        raise ValueError("Transformation resulted in NaN or infinite values")
+    
+    if np.std(y_transformed) == 0:
+        raise ValueError("Transformed target variable is constant (zero variance)")
+    
+    if verbose:
+        transformed_skewness = skew(y_transformed)
+        print(f"Transformed data skewness: {transformed_skewness:.3f}")
+        print(f"Transformation applied: {transformation_info['transformation_applied']}")
+    
+    # ===== MODEL TRAINING =====
+    if verbose:
+        print(f"\n=== Random Forest Training ===")
+    
+    # Create random forest model
+    rf_model = RandomForestRegressor(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        random_state=random_state,
+        n_jobs=-1
+    )
+    
+    # Cross-validation
+    cv = RepeatedKFold(n_splits=5, n_repeats=5, random_state=random_state)
+    
+    try:
+        scores = cross_val_score(rf_model, X_df_clean, y_transformed, cv=cv, scoring='r2')
+        if verbose:
+            print(f"Cross-validation R² scores: {scores}")
+            print(f"Mean CV R²: {scores.mean():.3f} ± {scores.std():.3f}")
+        
+        # Fit the model on all data
+        rf_model.fit(X_df_clean, y_transformed)
+        
+        # Get feature importance
+        feature_importance = pd.DataFrame({
+            'Feature': X_df_clean.columns,
+            'Importance': rf_model.feature_importances_
+        }).sort_values(by='Importance', ascending=False)
+        
+        if verbose:
+            print(f"Random forest training completed successfully")
+            print(f"Top 10 most important features:")
+            print(feature_importance.head(10))
+            
+    except Exception as e:
+        raise RuntimeError(f"Random forest training failed: {str(e)}")
+    
+    return rf_model, y_transformed, transformation_info, feature_importance
+
+
+def check_regression_assumptions(y_true, y_pred, y_transformed=None, y_pred_transformed=None, 
+                                transformation_info=None, verbose=True, alpha=0.05):
+    """
+    Comprehensive check of regression assumptions including normality, homoscedasticity, 
+    linearity, and independence of residuals.
+    
+    Parameters
+    ----------
+    y_true : array-like
+        True target values (original scale).
+    y_pred : array-like
+        Predicted target values (original scale).
+    y_transformed : array-like, optional
+        True target values in transformed scale.
+    y_pred_transformed : array-like, optional
+        Predicted target values in transformed scale.
+    transformation_info : dict, optional
+        Information about applied transformations.
+    verbose : bool, default=True
+        Whether to print detailed results and create plots.
+    alpha : float, default=0.05
+        Significance level for statistical tests.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing assumption test results and recommendations.
+    """
+    
+    if verbose:
+        print("=== REGRESSION ASSUMPTIONS CHECK ===")
+        print("This function checks the following assumptions:")
+        print("1. Normality of residuals")
+        print("2. Homoscedasticity (constant variance)")
+        print("3. Linearity of relationship")
+        print("4. Independence of residuals")
+        print("5. Absence of influential outliers")
+        print()
+    
+    results = {
+        'assumptions': {},
+        'recommendations': [],
+        'transformation_info': transformation_info
+    }
+    
+    # Calculate residuals in both original and transformed spaces
+    residuals_original = y_true - y_pred
+    
+    if y_transformed is not None and y_pred_transformed is not None:
+        residuals_transformed = y_transformed - y_pred_transformed
+        use_transformed = True
+    else:
+        residuals_transformed = None
+        use_transformed = False
+    
+    # ===== 1. NORMALITY OF RESIDUALS =====
+    if verbose:
+        print("1. NORMALITY OF RESIDUALS")
+        print("-" * 30)
+    
+    # Shapiro-Wilk test for normality
+    from scipy.stats import shapiro, jarque_bera
+    
+    # Test original residuals
+    shapiro_stat_orig, shapiro_p_orig = shapiro(residuals_original)
+    jarque_bera_stat_orig, jarque_bera_p_orig = jarque_bera(residuals_original)
+    
+    normality_original = {
+        'shapiro_wilk': {'statistic': shapiro_stat_orig, 'p_value': shapiro_p_orig, 'is_normal': shapiro_p_orig > alpha},
+        'jarque_bera': {'statistic': jarque_bera_stat_orig, 'p_value': jarque_bera_p_orig, 'is_normal': jarque_bera_p_orig > alpha}
+    }
+    
+    if verbose:
+        print(f"Original scale residuals:")
+        print(f"  Shapiro-Wilk: statistic={shapiro_stat_orig:.3f}, p={shapiro_p_orig:.3f}, normal={shapiro_p_orig > alpha}")
+        print(f"  Jarque-Bera: statistic={jarque_bera_stat_orig:.3f}, p={jarque_bera_p_orig:.3f}, normal={jarque_bera_p_orig > alpha}")
+    
+    # Test transformed residuals if available
+    if use_transformed:
+        shapiro_stat_trans, shapiro_p_trans = shapiro(residuals_transformed)
+        jarque_bera_stat_trans, jarque_bera_p_trans = jarque_bera(residuals_transformed)
+        
+        normality_transformed = {
+            'shapiro_wilk': {'statistic': shapiro_stat_trans, 'p_value': shapiro_p_trans, 'is_normal': shapiro_p_trans > alpha},
+            'jarque_bera': {'statistic': jarque_bera_stat_trans, 'p_value': jarque_bera_p_trans, 'is_normal': jarque_bera_p_trans > alpha}
+        }
+        
+        if verbose:
+            print(f"Transformed scale residuals:")
+            print(f"  Shapiro-Wilk: statistic={shapiro_stat_trans:.3f}, p={shapiro_p_trans:.3f}, normal={shapiro_p_trans > alpha}")
+            print(f"  Jarque-Bera: statistic={jarque_bera_stat_trans:.3f}, p={jarque_bera_p_trans:.3f}, normal={jarque_bera_p_trans > alpha}")
+    
+    results['assumptions']['normality'] = {
+        'original': normality_original,
+        'transformed': normality_transformed if use_transformed else None
+    }
+    
+    # ===== 2. HOMOSCEDASTICITY (CONSTANT VARIANCE) =====
+    if verbose:
+        print("\n2. HOMOSCEDASTICITY (CONSTANT VARIANCE)")
+        print("-" * 40)
+    
+    # Breusch-Pagan test for homoscedasticity
+    from scipy.stats import spearmanr
+    
+    # Test correlation between residuals and predicted values
+    spearman_corr_orig, spearman_p_orig = spearmanr(y_pred, np.abs(residuals_original))
+    
+    homoscedasticity_original = {
+        'spearman_correlation': {'correlation': spearman_corr_orig, 'p_value': spearman_p_orig, 'is_homoscedastic': spearman_p_orig > alpha}
+    }
+    
+    if verbose:
+        print(f"Original scale:")
+        print(f"  Spearman correlation (residuals vs predicted): {spearman_corr_orig:.3f}, p={spearman_p_orig:.3f}")
+        print(f"  Homoscedastic: {spearman_p_orig > alpha}")
+    
+    if use_transformed:
+        spearman_corr_trans, spearman_p_trans = spearmanr(y_pred_transformed, np.abs(residuals_transformed))
+        
+        homoscedasticity_transformed = {
+            'spearman_correlation': {'correlation': spearman_corr_trans, 'p_value': spearman_p_trans, 'is_homoscedastic': spearman_p_trans > alpha}
+        }
+        
+        if verbose:
+            print(f"Transformed scale:")
+            print(f"  Spearman correlation (residuals vs predicted): {spearman_corr_trans:.3f}, p={spearman_p_trans:.3f}")
+            print(f"  Homoscedastic: {spearman_p_trans > alpha}")
+    
+    results['assumptions']['homoscedasticity'] = {
+        'original': homoscedasticity_original,
+        'transformed': homoscedasticity_transformed if use_transformed else None
+    }
+    
+    # ===== 3. LINEARITY =====
+    if verbose:
+        print("\n3. LINEARITY")
+        print("-" * 15)
+    
+    # Test linearity using correlation between predicted and actual values
+    pearson_corr_orig, pearson_p_orig = pearsonr(y_true, y_pred)
+    spearman_corr_orig_lin, spearman_p_orig_lin = spearmanr(y_true, y_pred)
+    
+    linearity_original = {
+        'pearson_correlation': {'correlation': pearson_corr_orig, 'p_value': pearson_p_orig},
+        'spearman_correlation': {'correlation': spearman_corr_orig_lin, 'p_value': spearman_p_orig_lin}
+    }
+    
+    if verbose:
+        print(f"Original scale:")
+        print(f"  Pearson correlation (true vs predicted): {pearson_corr_orig:.3f}, p={pearson_p_orig:.3f}")
+        print(f"  Spearman correlation (true vs predicted): {spearman_corr_orig_lin:.3f}, p={spearman_p_orig_lin:.3f}")
+    
+    if use_transformed:
+        pearson_corr_trans, pearson_p_trans = pearsonr(y_transformed, y_pred_transformed)
+        spearman_corr_trans_lin, spearman_p_trans_lin = spearmanr(y_transformed, y_pred_transformed)
+        
+        linearity_transformed = {
+            'pearson_correlation': {'correlation': pearson_corr_trans, 'p_value': pearson_p_trans},
+            'spearman_correlation': {'correlation': spearman_corr_trans_lin, 'p_value': spearman_p_trans_lin}
+        }
+        
+        if verbose:
+            print(f"Transformed scale:")
+            print(f"  Pearson correlation (true vs predicted): {pearson_corr_trans:.3f}, p={pearson_p_trans:.3f}")
+            print(f"  Spearman correlation (true vs predicted): {spearman_corr_trans_lin:.3f}, p={spearman_p_trans_lin:.3f}")
+    
+    results['assumptions']['linearity'] = {
+        'original': linearity_original,
+        'transformed': linearity_transformed if use_transformed else None
+    }
+    
+    # ===== 4. INDEPENDENCE OF RESIDUALS =====
+    if verbose:
+        print("\n4. INDEPENDENCE OF RESIDUALS")
+        print("-" * 30)
+    
+    # Durbin-Watson test for autocorrelation
+    
+    dw_stat_orig = durbin_watson(residuals_original)
+    
+    # Durbin-Watson interpretation: 1.5-2.5 is good, <1.5 or >2.5 indicates autocorrelation
+    is_independent_orig = 1.5 <= dw_stat_orig <= 2.5
+    
+    independence_original = {
+        'durbin_watson': {'statistic': dw_stat_orig, 'is_independent': is_independent_orig}
+    }
+    
+    if verbose:
+        print(f"Original scale:")
+        print(f"  Durbin-Watson statistic: {dw_stat_orig:.3f}")
+        print(f"  Independent residuals: {is_independent_orig} (1.5-2.5 is good)")
+    
+    if use_transformed:
+        dw_stat_trans = durbin_watson(residuals_transformed)
+        is_independent_trans = 1.5 <= dw_stat_trans <= 2.5
+        
+        independence_transformed = {
+            'durbin_watson': {'statistic': dw_stat_trans, 'is_independent': is_independent_trans}
+        }
+        
+        if verbose:
+            print(f"Transformed scale:")
+            print(f"  Durbin-Watson statistic: {dw_stat_trans:.3f}")
+            print(f"  Independent residuals: {is_independent_trans} (1.5-2.5 is good)")
+    
+    results['assumptions']['independence'] = {
+        'original': independence_original,
+        'transformed': independence_transformed if use_transformed else None
+    }
+    
+    # ===== 5. OUTLIERS AND INFLUENTIAL POINTS =====
+    if verbose:
+        print("\n5. OUTLIERS AND INFLUENTIAL POINTS")
+        print("-" * 35)
+    
+    # Calculate standardized residuals
+    std_residuals_orig = residuals_original / np.std(residuals_original)
+    outliers_orig = np.abs(std_residuals_orig) > 3  # 3 standard deviations
+    
+    outliers_original = {
+        'n_outliers': np.sum(outliers_orig),
+        'outlier_percentage': np.mean(outliers_orig) * 100,
+        'outlier_indices': np.where(outliers_orig)[0].tolist()
+    }
+    
+    if verbose:
+        print(f"Original scale:")
+        print(f"  Number of outliers (|residual| > 3σ): {outliers_original['n_outliers']}")
+        print(f"  Outlier percentage: {outliers_original['outlier_percentage']:.1f}%")
+    
+    if use_transformed:
+        std_residuals_trans = residuals_transformed / np.std(residuals_transformed)
+        outliers_trans = np.abs(std_residuals_trans) > 3
+        
+        outliers_transformed = {
+            'n_outliers': np.sum(outliers_trans),
+            'outlier_percentage': np.mean(outliers_trans) * 100,
+            'outlier_indices': np.where(outliers_trans)[0].tolist()
+        }
+        
+        if verbose:
+            print(f"Transformed scale:")
+            print(f"  Number of outliers (|residual| > 3σ): {outliers_transformed['n_outliers']}")
+            print(f"  Outlier percentage: {outliers_transformed['outlier_percentage']:.1f}%")
+    
+    results['assumptions']['outliers'] = {
+        'original': outliers_original,
+        'transformed': outliers_transformed if use_transformed else None
+    }
+    
+    # ===== GENERATE RECOMMENDATIONS =====
+    recommendations = []
+    
+    # Normality recommendations
+    if not normality_original['shapiro_wilk']['is_normal']:
+        recommendations.append("Original scale residuals are not normally distributed. Consider log transformation.")
+    
+    if use_transformed and not normality_transformed['shapiro_wilk']['is_normal']:
+        recommendations.append("Transformed scale residuals are still not normally distributed. Consider other transformations.")
+    
+    # Homoscedasticity recommendations
+    if not homoscedasticity_original['spearman_correlation']['is_homoscedastic']:
+        recommendations.append("Heteroscedasticity detected in original scale. Consider transformation or weighted regression.")
+    
+    # Independence recommendations
+    if not independence_original['durbin_watson']['is_independent']:
+        recommendations.append("Residuals show autocorrelation. Consider time-series methods or check for missing variables.")
+    
+    # Outlier recommendations
+    if outliers_original['outlier_percentage'] > 5:
+        recommendations.append(f"High number of outliers ({outliers_original['outlier_percentage']:.1f}%). Consider robust regression methods.")
+    
+    # Overall assessment
+    if verbose:
+        print("\n=== OVERALL ASSESSMENT ===")
+        print("-" * 25)
+        
+        # Count violated assumptions
+        violations_orig = 0
+        if not normality_original['shapiro_wilk']['is_normal']: violations_orig += 1
+        if not homoscedasticity_original['spearman_correlation']['is_homoscedastic']: violations_orig += 1
+        if not independence_original['durbin_watson']['is_independent']: violations_orig += 1
+        if outliers_original['outlier_percentage'] > 5: violations_orig += 1
+        
+        if violations_orig == 0:
+            print("✅ All major assumptions are satisfied in original scale!")
+        elif violations_orig <= 2:
+            print(f"⚠️  {violations_orig} assumption(s) violated in original scale. Model may still be useful.")
+        else:
+            print(f"❌ {violations_orig} assumption(s) violated in original scale. Consider model alternatives.")
+        
+        if use_transformed:
+            violations_trans = 0
+            if not normality_transformed['shapiro_wilk']['is_normal']: violations_trans += 1
+            if not homoscedasticity_transformed['spearman_correlation']['is_homoscedastic']: violations_trans += 1
+            if not independence_transformed['durbin_watson']['is_independent']: violations_trans += 1
+            if outliers_transformed['outlier_percentage'] > 5: violations_trans += 1
+            
+            if violations_trans == 0:
+                print("✅ All major assumptions are satisfied in transformed scale!")
+            elif violations_trans <= 2:
+                print(f"⚠️  {violations_trans} assumption(s) violated in transformed scale. Model may still be useful.")
+            else:
+                print(f"❌ {violations_trans} assumption(s) violated in transformed scale. Consider model alternatives.")
+    
+    results['recommendations'] = recommendations
+    
+    # ===== CREATE VISUALIZATIONS =====
+    if verbose:
+        try:
+            print("\n=== CREATING DIAGNOSTIC PLOTS ===")
+            
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            
+            # 1. Residuals vs Predicted (Original)
+            axes[0, 0].scatter(y_pred, residuals_original, alpha=0.7)
+            axes[0, 0].axhline(y=0, color='r', linestyle='--')
+            axes[0, 0].set_xlabel('Predicted Values')
+            axes[0, 0].set_ylabel('Residuals')
+            axes[0, 0].set_title('Residuals vs Predicted (Original)')
+            axes[0, 0].grid(True, alpha=0.3)
+            
+            # 2. Q-Q Plot (Original)
+            from scipy.stats import probplot
+            probplot(residuals_original, dist="norm", plot=axes[0, 1])
+            axes[0, 1].set_title('Q-Q Plot (Original)')
+            axes[0, 1].grid(True, alpha=0.3)
+            
+            # 3. Histogram of Residuals (Original)
+            axes[0, 2].hist(residuals_original, bins=20, alpha=0.7, density=True)
+            axes[0, 2].set_xlabel('Residuals')
+            axes[0, 2].set_ylabel('Density')
+            axes[0, 2].set_title('Residuals Distribution (Original)')
+            axes[0, 2].grid(True, alpha=0.3)
+            
+            # 4. Residuals vs Predicted (Transformed) - if available
+            if use_transformed:
+                axes[1, 0].scatter(y_pred_transformed, residuals_transformed, alpha=0.7)
+                axes[1, 0].axhline(y=0, color='r', linestyle='--')
+                axes[1, 0].set_xlabel('Predicted Values (Transformed)')
+                axes[1, 0].set_ylabel('Residuals (Transformed)')
+                axes[1, 0].set_title('Residuals vs Predicted (Transformed)')
+                axes[1, 0].grid(True, alpha=0.3)
+                
+                # 5. Q-Q Plot (Transformed)
+                probplot(residuals_transformed, dist="norm", plot=axes[1, 1])
+                axes[1, 1].set_title('Q-Q Plot (Transformed)')
+                axes[1, 1].grid(True, alpha=0.3)
+                
+                # 6. Histogram of Residuals (Transformed)
+                axes[1, 2].hist(residuals_transformed, bins=20, alpha=0.7, density=True)
+                axes[1, 2].set_xlabel('Residuals (Transformed)')
+                axes[1, 2].set_ylabel('Density')
+                axes[1, 2].set_title('Residuals Distribution (Transformed)')
+                axes[1, 2].grid(True, alpha=0.3)
+            else:
+                # Hide transformed plots if not available
+                for i in range(3):
+                    axes[1, i].set_visible(False)
+            
+            plt.tight_layout()
+            plt.show()
+            
+        except Exception as e:
+            print(f"Warning: Could not create diagnostic plots: {str(e)}")
+    
+    return results
+
+from scipy.stats import skew
+import numpy as np
+
+def transform_target_if_skewed(y, motor_score_name=None, apply_log_transform=True, verbose=True):
+    """
+    Detects skew in a target variable and applies log transformation if appropriate.
+
+    Parameters
+    ----------
+    y : array-like
+        Original target variable.
+    motor_score_name : str, optional
+        Used to guide expected skew direction (e.g., 'nmf' or 'fugl').
+    apply_log_transform : bool, default=True
+        Whether to apply transformation if skewed.
+    verbose : bool, default=True
+        Whether to print transformation info.
+
+    Returns
+    -------
+    y_transformed : np.ndarray
+        Transformed target (or original if no transform applied).
+    transformation_info : dict
+        Information about the applied transformation.
+    """
+    y = np.array(y)
+    y_skewness = skew(y)
+
+    transformation_info = {
+        'original_skewness': y_skewness,
+        'transformation_applied': None,
+        'transformation_params': {}
+    }
+
+    y_transformed = y.copy()
+
+    if apply_log_transform and abs(y_skewness) > 1:
+        if motor_score_name and 'nmf' in motor_score_name.lower() and y_skewness > 1:
+            y_transformed = np.log1p(y)
+            transformation_info.update({
+                'transformation_applied': 'log1p',
+                'transformation_params': {}
+            })
+        elif motor_score_name and 'fugl' in motor_score_name.lower() and y_skewness < -1:
+            y_transformed = np.log1p(y.max() - y)
+            transformation_info.update({
+                'transformation_applied': 'log1p_reverse',
+                'transformation_params': {'max_value': y.max()}
+            })
+        elif y_skewness > 1:
+            y_transformed = np.log1p(y)
+            transformation_info.update({
+                'transformation_applied': 'log1p',
+                'transformation_params': {}
+            })
+        elif y_skewness < -1:
+            y_transformed = np.log1p(y.max() - y)
+            transformation_info.update({
+                'transformation_applied': 'log1p_reverse',
+                'transformation_params': {'max_value': y.max()}
+            })
+
+    if verbose:
+        print(f"Original skewness: {y_skewness:.3f}")
+        print(f"Transformation applied: {transformation_info['transformation_applied'] or 'None'}")
+
+    return y_transformed, transformation_info
+
+def visualize_neural_network_regression(model, X_df_clean, y, y_transformed, transformation_info, 
+                                       motor_score_name=None, figsize=(15, 12), save_path=None):
+    """
+    Comprehensive visualization of neural network regression results.
+    
+    Parameters
+    ----------
+    model : sklearn.pipeline.Pipeline
+        Fitted neural network model (pipeline with scaler and MLPRegressor).
+    X_df_clean : pandas.DataFrame
+        Feature matrix used for training.
+    y : array-like
+        Original target variable.
+    y_transformed : array-like
+        Transformed target variable used for training.
+    transformation_info : dict
+        Information about applied transformations.
+    motor_score_name : str, optional
+        Name of the motor score for plot titles.
+    figsize : tuple, default=(15, 12)
+        Figure size for the plots.
+    save_path : str, optional
+        Path to save the figure (e.g., 'neural_network_plots.png').
+    
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The created figure with all plots.
+    """
+    
+    # Get predictions
+    y_pred_transformed = model.predict(X_df_clean)
+    
+    # Try to get predictions on original scale
+    try:
+        y_pred = reverse_transform_predictions(y_pred_transformed, transformation_info)
+        use_original_scale = True
+    except Exception:
+        y_pred = y_pred_transformed
+        use_original_scale = False
+    
+    # Calculate residuals
+    residuals_transformed = y_transformed - y_pred_transformed
+    if use_original_scale:
+        residuals_original = y - y_pred
+    else:
+        residuals_original = residuals_transformed
+    
+    # Calculate R² scores
+    r2_transformed = r2_score(y_transformed, y_pred_transformed)
+    if use_original_scale:
+        r2_original = r2_score(y, y_pred)
+    else:
+        r2_original = r2_transformed
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(3, 2, figsize=figsize)
+    fig.suptitle(f'Neural Network Regression Results for {motor_score_name or "Target Variable"}', 
+                 fontsize=16, fontweight='bold')
+    
+    # 1. Prediction vs Actual Plot (Transformed Scale)
+    ax1 = axes[0, 0]
+    ax1.scatter(y_transformed, y_pred_transformed, alpha=0.6, color='steelblue', s=50)
+    
+    # Add regression line
+    min_val = min(y_transformed.min(), y_pred_transformed.min())
+    max_val = max(y_transformed.max(), y_pred_transformed.max())
+    ax1.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction')
+    
+    # Add trend line
+    z = np.polyfit(y_transformed, y_pred_transformed, 1)
+    p = np.poly1d(z)
+    ax1.plot(y_transformed, p(y_transformed), "g-", linewidth=2, label=f'Trend Line (slope={z[0]:.3f})')
+    
+    ax1.set_xlabel('Actual Values (Transformed)')
+    ax1.set_ylabel('Predicted Values (Transformed)')
+    ax1.set_title(f'Prediction vs Actual (Transformed)\nR² = {r2_transformed:.3f}')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Prediction vs Actual Plot (Original Scale) - if possible
+    ax2 = axes[0, 1]
+    if use_original_scale:
+        ax2.scatter(y, y_pred, alpha=0.6, color='darkgreen', s=50)
+        
+        # Add regression line
+        min_val = min(y.min(), y_pred.min())
+        max_val = max(y.max(), y_pred.max())
+        ax2.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction')
+        
+        # Add trend line
+        z = np.polyfit(y, y_pred, 1)
+        p = np.poly1d(z)
+        ax2.plot(y, p(y), "g-", linewidth=2, label=f'Trend Line (slope={z[0]:.3f})')
+        
+        ax2.set_xlabel('Actual Values (Original)')
+        ax2.set_ylabel('Predicted Values (Original)')
+        ax2.set_title(f'Prediction vs Actual (Original)\nR² = {r2_original:.3f}')
+    else:
+        ax2.text(0.5, 0.5, 'Original scale\nnot available\n(due to transform)', 
+                ha='center', va='center', transform=ax2.transAxes, fontsize=12)
+        ax2.set_title('Prediction vs Actual (Original)')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Residuals Plot (Transformed Scale)
+    ax3 = axes[1, 0]
+    ax3.scatter(y_pred_transformed, residuals_transformed, alpha=0.6, color='orange', s=50)
+    ax3.axhline(y=0, color='r', linestyle='--', linewidth=2)
+    ax3.set_xlabel('Predicted Values (Transformed)')
+    ax3.set_ylabel('Residuals (Transformed)')
+    ax3.set_title('Residuals vs Predicted (Transformed)')
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Residuals Plot (Original Scale) - if possible
+    ax4 = axes[1, 1]
+    if use_original_scale:
+        ax4.scatter(y_pred, residuals_original, alpha=0.6, color='purple', s=50)
+        ax4.axhline(y=0, color='r', linestyle='--', linewidth=2)
+        ax4.set_xlabel('Predicted Values (Original)')
+        ax4.set_ylabel('Residuals (Original)')
+        ax4.set_title('Residuals vs Predicted (Original)')
+    else:
+        ax4.text(0.5, 0.5, 'Original scale\nnot available\n(due to transform)', 
+                ha='center', va='center', transform=ax4.transAxes, fontsize=12)
+        ax4.set_title('Residuals vs Predicted (Original)')
+    ax4.grid(True, alpha=0.3)
+    
+    # 5. Residuals Distribution
+    ax5 = axes[2, 0]
+    ax5.hist(residuals_transformed, bins=20, alpha=0.7, color='lightblue', edgecolor='black')
+    ax5.axvline(x=0, color='r', linestyle='--', linewidth=2)
+    ax5.set_xlabel('Residuals (Transformed)')
+    ax5.set_ylabel('Frequency')
+    ax5.set_title('Residuals Distribution (Transformed)')
+    ax5.grid(True, alpha=0.3)
+    
+    # 6. Feature Importance (Top 10)
+    ax6 = axes[2, 1]
+    
+    # Get permutation importance
+    result = permutation_importance(model, X_df_clean, y_transformed, n_repeats=10, random_state=42, scoring='r2')
+    importances = result.importances_mean
+    feature_names = X_df_clean.columns
+    
+    # Get top 10 features
+    top_indices = importances.argsort()[::-1][:10]
+    top_features = feature_names[top_indices]
+    top_importances = importances[top_indices]
+    
+    # Create horizontal bar plot
+    y_pos = np.arange(len(top_features))
+    ax6.barh(y_pos, top_importances, color='coral', alpha=0.7)
+    ax6.set_yticks(y_pos)
+    ax6.set_yticklabels(top_features)
+    ax6.set_xlabel('Permutation Importance')
+    ax6.set_title('Top 10 Feature Importance')
+    ax6.grid(True, alpha=0.3, axis='x')
+    
+    # Add value labels on bars
+    for i, v in enumerate(top_importances):
+        ax6.text(v + 0.001, i, f'{v:.3f}', va='center', fontsize=9)
+    
+    plt.tight_layout()
+    
+    # Save if path provided
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to: {save_path}")
+    
+    return fig
+
+
+def plot_neural_network_learning_curves(model, X_df_clean, y_transformed, cv_splits=5, 
+                                       motor_score_name=None, figsize=(12, 5), save_path=None):
+    """
+    Plot learning curves for neural network to assess overfitting/underfitting.
+    
+    Parameters
+    ----------
+    model : sklearn.pipeline.Pipeline
+        Fitted neural network model.
+    X_df_clean : pandas.DataFrame
+        Feature matrix used for training.
+    y_transformed : array-like
+        Transformed target variable used for training.
+    cv_splits : int, default=5
+        Number of cross-validation splits.
+    motor_score_name : str, optional
+        Name of the motor score for plot titles.
+    figsize : tuple, default=(12, 5)
+        Figure size for the plots.
+    save_path : str, optional
+        Path to save the figure.
+    
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The created figure with learning curves.
+    """
+    
+    from sklearn.model_selection import learning_curve
+    
+    # Generate learning curves
+    train_sizes, train_scores, val_scores = learning_curve(
+        model, X_df_clean, y_transformed, 
+        cv=cv_splits, 
+        train_sizes=np.linspace(0.1, 1.0, 10),
+        scoring='r2',
+        random_state=42
+    )
+    
+    # Calculate means and standard deviations
+    train_mean = np.mean(train_scores, axis=1)
+    train_std = np.std(train_scores, axis=1)
+    val_mean = np.mean(val_scores, axis=1)
+    val_std = np.std(val_scores, axis=1)
+    
+    # Create figure
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    fig.suptitle(f'Neural Network Learning Curves for {motor_score_name or "Target Variable"}', 
+                 fontsize=14, fontweight='bold')
+    
+    # Plot 1: Learning curves
+    ax1.plot(train_sizes, train_mean, 'o-', color='blue', label='Training Score')
+    ax1.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, alpha=0.1, color='blue')
+    
+    ax1.plot(train_sizes, val_mean, 'o-', color='red', label='Cross-validation Score')
+    ax1.fill_between(train_sizes, val_mean - val_std, val_mean + val_std, alpha=0.1, color='red')
+    
+    ax1.set_xlabel('Training Examples')
+    ax1.set_ylabel('R² Score')
+    ax1.set_title('Learning Curves')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Gap between training and validation
+    gap = train_mean - val_mean
+    ax2.plot(train_sizes, gap, 'o-', color='green', linewidth=2)
+    ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+    ax2.set_xlabel('Training Examples')
+    ax2.set_ylabel('Training Score - CV Score')
+    ax2.set_title('Overfitting Gap')
+    ax2.grid(True, alpha=0.3)
+    
+    # Add interpretation text
+    if gap[-1] > 0.1:
+        interpretation = "High overfitting detected"
+        color = 'red'
+    elif gap[-1] > 0.05:
+        interpretation = "Moderate overfitting"
+        color = 'orange'
+    else:
+        interpretation = "Good generalization"
+        color = 'green'
+    
+    ax2.text(0.02, 0.98, interpretation, transform=ax2.transAxes, 
+             verticalalignment='top', fontsize=12, color=color, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    # Save if path provided
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Learning curves saved to: {save_path}")
+    
+    return fig
+
+
+def create_neural_network_diagnostic_report(model, X_df_clean, y, y_transformed, transformation_info, 
+                                           motor_score_name=None, save_dir=None):
+    """
+    Create a comprehensive diagnostic report for neural network regression.
+    
+    Parameters
+    ----------
+    model : sklearn.pipeline.Pipeline
+        Fitted neural network model.
+    X_df_clean : pandas.DataFrame
+        Feature matrix used for training.
+    y : array-like
+        Original target variable.
+    y_transformed : array-like
+        Transformed target variable used for training.
+    transformation_info : dict
+        Information about applied transformations.
+    motor_score_name : str, optional
+        Name of the motor score for report titles.
+    save_dir : str, optional
+        Directory to save the report figures.
+    
+    Returns
+    -------
+    dict
+        Dictionary containing all diagnostic metrics and figures.
+    """
+    
+    # Get predictions
+    y_pred_transformed = model.predict(X_df_clean)
+    
+    # Try to get predictions on original scale
+    try:
+        y_pred = reverse_transform_predictions(y_pred_transformed, transformation_info)
+        use_original_scale = True
+    except Exception:
+        y_pred = y_pred_transformed
+        use_original_scale = False
+    
+    # Calculate metrics
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    
+    metrics = {
+        'r2_transformed': r2_score(y_transformed, y_pred_transformed),
+        'mse_transformed': mean_squared_error(y_transformed, y_pred_transformed),
+        'mae_transformed': mean_absolute_error(y_transformed, y_pred_transformed),
+        'rmse_transformed': np.sqrt(mean_squared_error(y_transformed, y_pred_transformed))
+    }
+    
+    if use_original_scale:
+        metrics.update({
+            'r2_original': r2_score(y, y_pred),
+            'mse_original': mean_squared_error(y, y_pred),
+            'mae_original': mean_absolute_error(y, y_pred),
+            'rmse_original': np.sqrt(mean_squared_error(y, y_pred))
+        })
+    
+    # Create visualizations
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        base_name = f"nn_diagnostic_{motor_score_name or 'target'}"
+        
+        # Main diagnostic plots
+        fig1 = visualize_neural_network_regression(
+            model, X_df_clean, y, y_transformed, transformation_info, 
+            motor_score_name, save_path=f"{save_dir}/{base_name}_main_plots.png"
+        )
+        
+        # Learning curves
+        fig2 = plot_neural_network_learning_curves(
+            model, X_df_clean, y_transformed, 
+            motor_score_name, save_path=f"{save_dir}/{base_name}_learning_curves.png"
+        )
+        
+        # Regression assumptions
+        fig3 = check_regression_assumptions(
+            y, y_pred, y_transformed, y_pred_transformed, transformation_info, 
+            verbose=False, alpha=0.05
+        )
+        if fig3:
+            fig3.savefig(f"{save_dir}/{base_name}_assumptions.png", dpi=300, bbox_inches='tight')
+    
+    # Print summary
+    print(f"\n{'='*60}")
+    print(f"NEURAL NETWORK DIAGNOSTIC REPORT")
+    print(f"Target Variable: {motor_score_name or 'Unknown'}")
+    print(f"{'='*60}")
+    
+    print(f"\nPERFORMANCE METRICS:")
+    print(f"R² (transformed): {metrics['r2_transformed']:.4f}")
+    print(f"MSE (transformed): {metrics['mse_transformed']:.4f}")
+    print(f"MAE (transformed): {metrics['mae_transformed']:.4f}")
+    print(f"RMSE (transformed): {metrics['rmse_transformed']:.4f}")
+    
+    if use_original_scale:
+        print(f"R² (original): {metrics['r2_original']:.4f}")
+        print(f"MSE (original): {metrics['mse_original']:.4f}")
+        print(f"MAE (original): {metrics['mae_original']:.4f}")
+        print(f"RMSE (original): {metrics['rmse_original']:.4f}")
+    
+    print(f"\nTRANSFORMATION INFO:")
+    print(f"Original skewness: {transformation_info.get('original_skewness', 'N/A'):.3f}")
+    print(f"Transformation applied: {transformation_info.get('transformation_applied', 'None')}")
+    
+    print(f"\nMODEL INFO:")
+    print(f"Number of features: {X_df_clean.shape[1]}")
+    print(f"Number of samples: {len(y)}")
+    
+    # Get model architecture info
+    mlp = model.named_steps['mlp']
+    print(f"Hidden layers: {mlp.hidden_layer_sizes}")
+    print(f"Activation: {mlp.activation}")
+    print(f"Max iterations: {mlp.max_iter}")
+    
+    return {
+        'metrics': metrics,
+        'transformation_info': transformation_info,
+        'use_original_scale': use_original_scale,
+        'figures': [fig1, fig2] if save_dir else None
+    }
