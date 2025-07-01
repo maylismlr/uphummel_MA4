@@ -20,8 +20,18 @@ def main(rois, request_type = 'all', cluster = False, num_clusters = 2, correcti
     # categorical and numerical columns
     categorical_cols = ['Lesion_side', 'Stroke_location','Combined', 'Bilateral']
     numerical_cols = ['lesion_volume_mm3','Gender','Age','Education_level']
+    excel_folder_path = "data/"
     
-    regression_info, rsfMRI_full_info = functions.load_excel_data(excel_folder_path)
+    FM_folder_path = "data/Raw_MissingDataImputed/"
+    '''regression_info, rsfMRI_full_info = functions.load_excel_data(excel_folder_path, FM_folder_path)
+    folder_path = "FC_matrices_times_wp11/"
+
+    rois = [363, 364, 365, 368, 372, 373, 374, 377, 379, 361, 370, 362, 371, 12, 54, 56, 78, 96, 192, 234, 236, 258, 276, 8, 9, 51, 52, 53, 188, 189, 231, 232, 233]
+    rois = [roi - 1 for roi in rois]
+    rois_sub = rois
+    rois_full = np.arange(0, 379)
+    roi_mapping = functions.load_roi_labels("data/HCP-MMP1_RegionsCorticesList_379.csv")'''
+    regression_info, rsfMRI_full_info = functions.load_excel_data(excel_folder_path, FM_folder_path)
 
     if request_type == 'all':
         # Load the data

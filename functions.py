@@ -16,7 +16,7 @@ from sklearn.impute import SimpleImputer
 # for statistical tests
 from scipy.stats import ttest_rel, ttest_ind
 from statsmodels.stats.multitest import multipletests
-from scipy.stats import shapiro, wilcoxon, pearsonr, spearmanr
+from scipy.stats import shapiro, wilcoxon, pearsonr, spearmanr, jarque_bera
 
 # for regression
 from sklearn.ensemble import RandomForestRegressor
@@ -32,8 +32,9 @@ from scipy.stats import zscore
 from scipy.stats import skew
 from statsmodels.stats.stattools import durbin_watson 
 from sklearn.neural_network import MLPRegressor
-
-
+from sklearn.inspection import permutation_importance
+from scipy.stats import probplot
+from sklearn.model_selection import learning_curve
 
 # for prettiness <3
 from tqdm import tqdm
@@ -299,10 +300,6 @@ def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1
     plt.show();
 '''
 def plot_all_subject_matrices(subject_matrices, subjects, rois, request_type='t1_t3'):
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from tqdm import tqdm
 
     if request_type == 'all':
         timepoints = ['T1_matrix', 'T2_matrix', 'T3_matrix', 'T4_matrix']
@@ -857,7 +854,7 @@ def analyze_matrices(t1_matrices, t_matrices, correction, alpha, label="", roi_l
         xticklabels=roi_labels,
         yticklabels=roi_labels
     )
-    #plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
+    plt.title(f"Significance Heatmap {label} (FDR-corrected: {correction})")
     plt.xlabel("ROIs")
     plt.ylabel("ROIs")
     plt.xticks(rotation=45, ha='right')
@@ -1444,113 +1441,6 @@ def plot_mean_yeo_matrices(all_yeo_matrices, labels):
 
 
 
-'''
-def motor_correlation(
-    df,
-    regression_info,
-    tp=3,
-    motor_test='nmf_motor',
-    corr_type='pearsonr',
-    selected_rois_labels=None,
-    mask_significant_only=True
-):
-    # Step 1: Filter rows with valid T1_matrix
-    valid_data = df[df["T1_matrix"].apply(lambda x: isinstance(x, pd.DataFrame))].copy()
-    if valid_data.empty:
-        print("No valid FC matrices found.")
-        return None, None
-
-    # Step 2: Get ROI labels from one matrix
-    roi_labels = valid_data["T1_matrix"].iloc[0].index.tolist()
-
-    # Step 3: Prepare output matrices
-    correlation_matrix = pd.DataFrame(index=roi_labels, columns=roi_labels, dtype=float)
-    p_value_matrix = pd.DataFrame(index=roi_labels, columns=roi_labels, dtype=float)
-
-    # Step 4: Merge with behavioral data
-    regression_t = regression_info[
-        (regression_info["TimePoint"] == f"T{tp}") &
-        (regression_info["Behavioral_assessment"] == 1) &
-        (regression_info["MRI"] == 1)
-    ].copy()
-
-    if motor_test not in regression_t.columns:
-        print(f"Motor test '{motor_test}' not found.")
-        return None, None
-
-    valid_data = valid_data.merge(
-        regression_t[["subject_id", motor_test]],
-        on="subject_id"
-    )
-
-    if valid_data.empty:
-        print("No data after merging with behavioral scores.")
-        return None, None
-
-    motor_scores = valid_data[motor_test].values
-
-    # Step 5: Correlation computation
-    for i in roi_labels:
-        for j in roi_labels:
-            fc_values = valid_data["T1_matrix"].apply(lambda mat: mat.loc[i, j]).values
-            # Drop NaNs
-            stack = np.stack([fc_values, motor_scores], axis=1)
-            valid = ~np.isnan(stack).any(axis=1)
-            if valid.sum() >= 3:
-                if corr_type == "pearsonr":
-                    r, p = pearsonr(fc_values[valid], motor_scores[valid])
-                elif corr_type == "spearmanr":
-                    r, p = spearmanr(fc_values[valid], motor_scores[valid])
-                else:
-                    raise ValueError(f"Invalid correlation type: {corr_type}")
-            else:
-                r, p = np.nan, np.nan
-            correlation_matrix.loc[i, j] = r
-            p_value_matrix.loc[i, j] = p
-
-    # Step 6: Filter + Visualize selected ROIs if specified
-    if selected_rois_labels is not None:
-        corr_selected = correlation_matrix.loc[selected_rois_labels, :]
-        p_val_selected = p_value_matrix.loc[selected_rois_labels, :]
-
-        if mask_significant_only:
-            corr_selected = corr_selected.where(p_val_selected < 0.05)
-
-        plt.figure(figsize=(8, 4))
-        sns.heatmap(
-            corr_selected.astype(float),
-            cmap="coolwarm",
-            center=0,
-            xticklabels=[col + 1 for col in corr_selected.columns],
-            yticklabels=[roi + 1 for roi in selected_rois_labels]
-        )
-        plt.title(f"{corr_type.capitalize()} correlation: FC (T1, selected ROIs) vs {motor_test} at T{tp}")
-        plt.xlabel("ROI")
-        plt.ylabel("Striatal ROI")
-        plt.tight_layout()
-        plt.show()
-    else:
-        # Full matrix heatmap
-        plt.figure(figsize=(7, 5))
-        sns.heatmap(
-            correlation_matrix.astype(float),
-            cmap="coolwarm",
-            center=0,
-            xticklabels=roi_labels,
-            yticklabels=roi_labels
-        )
-        plt.title(f"{corr_type.capitalize()} correlation: FC (T1) vs {motor_test} at T{tp}")
-        plt.xlabel("ROI")
-        plt.ylabel("ROI")
-        plt.tight_layout()
-        plt.show()
-
-    return correlation_matrix, p_value_matrix'''
-
-
-
-# WORKS FOR IPSI CONTRA SPLIT, BUT NOT FOR YEOMATRIX
-
 def motor_correlation(
     df,
     regression_info,
@@ -1681,7 +1571,6 @@ def motor_correlation(
 
 
 
-
 def assign_fugl_ipsi_contra(row):
     if row["Lesion_side"] == "L":
         return pd.Series({
@@ -1725,6 +1614,7 @@ def switch_contra_ipsi_df(df, rois, tp=3, roi_mapping=None):
     })
     
     return df_aligned
+
 
 
 def check_corr(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fugl_Meyer_ipsi', corr_type='pearsonr'):
@@ -1778,6 +1668,8 @@ def check_corr(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fu
 
     else:
         raise ValueError("Unsupported correlation type. Use 'pearsonr' or 'spearmanr'.")
+
+
 
 def check_corr_cleaned(df_aligned, regression_T1, region1, region2, tp=3, motor_test='Fugl_Meyer_ipsi', corr_type='pearsonr', z_thresh=3.0):
     # Merge datasets
@@ -1855,108 +1747,6 @@ def check_corr_cleaned(df_aligned, regression_T1, region1, region2, tp=3, motor_
 
 
 
-######################################### MODULARITY COMPUTATION ############################
-
-
-
-def compute_modularity(fc_df):
-    if fc_df is None or not isinstance(fc_df, pd.DataFrame):
-        return np.nan
-
-    try:
-        W = fc_df.replace([np.inf, -np.inf], 0).to_numpy()
-
-        # Optional: match expected size
-        W = W[:359, :359]
-
-        # Remove negative weights (as done in the paper)
-        W[W < 0] = 0
-
-        # Compute modularity
-        _, Q = bct.modularity_louvain_und(W, seed=42)
-        
-        return Q
-    except Exception as e:
-        print(f"Error: {e}")
-        return np.nan
-
-
-'''
-def modularity_correlation(
-    modularity_df,
-    regression_info,
-    tp=3,
-    motor_test='nmf_motor',
-    corr_type='pearsonr'
-):
-    """
-    Correlate modularity values at a specific timepoint with motor test scores.
-
-    Args:
-        modularity_df (DataFrame): Must contain modularity values in columns like 'T1_matrix', 'T2_matrix', etc.
-        regression_info (DataFrame): Behavioral data with 'TimePoint', 'subject_id', and motor score columns.
-        tp (int): Timepoint to use (e.g., 1, 3, 4).
-        motor_test (str): Column name of the motor score to correlate.
-        corr_type (str): 'pearsonr' or 'spearmanr'.
-
-    Returns:
-        r (float), p (float): Correlation coefficient and p-value.
-    """
-    # Match timepoint column name in modularity_df
-    tp_col = f"T{tp}_matrix"
-
-    if tp_col not in modularity_df.columns:
-        print(f"{tp_col} not found in modularity_df")
-        return None, None
-
-    # Filter behavioral data
-    regression_t = regression_info[
-        (regression_info["TimePoint"] == f"T{tp}") &
-        (regression_info["Behavioral_assessment"] == 1) &
-        (regression_info["MRI"] == 1)
-    ].copy()
-
-    if motor_test not in regression_t.columns:
-        print(f"Motor test '{motor_test}' not found in regression_info.")
-        return None, None
-
-    df = modularity_df.copy()
-    df["subject_id"] = df["subject_id"].astype(str)  # ensure string
-    regression_t["subject_id"] = regression_t["subject_id"].astype(str)
-
-    merged = df.merge(regression_t[["subject_id", motor_test]], on="subject_id")
-
-
-    modularity_scores = merged[tp_col].values
-    motor_scores = merged[motor_test].values
-
-    # Remove NaNs
-    valid = ~np.isnan(modularity_scores) & ~np.isnan(motor_scores)
-
-    if valid.sum() < 3:
-        print("Not enough valid data points for correlation.")
-        return None, None
-
-    # Perform correlation
-    if corr_type == 'pearsonr':
-        r, p = pearsonr(modularity_scores[valid], motor_scores[valid])
-    elif corr_type == 'spearmanr':
-        r, p = spearmanr(modularity_scores[valid], motor_scores[valid])
-    else:
-        raise ValueError("corr_type must be 'pearsonr' or 'spearmanr'")
-
-    # Plot
-    plt.figure(figsize=(6, 5))
-    sns.regplot(x=modularity_scores[valid], y=motor_scores[valid])
-    plt.xlabel(f"Modularity (T{tp})")
-    plt.ylabel(f"{motor_test} (T{tp})")
-    plt.title(f"{corr_type.capitalize()} correlation: Modularity vs {motor_test} at T{tp}\n"
-              f"r = {r:.2f}, p = {p:.4f}")
-    plt.tight_layout()
-    plt.show()
-
-    return r, p'''
-    
 def metrics_correlation(
     modularity_df,
     regression_info,
@@ -2132,7 +1922,36 @@ def metrics_correlation_cleaned(
 
 
 
+######################################### MODULARITY COMPUTATION ############################
+
+
+
+def compute_modularity(fc_df):
+    if fc_df is None or not isinstance(fc_df, pd.DataFrame):
+        return np.nan
+
+    try:
+        W = fc_df.replace([np.inf, -np.inf], 0).to_numpy()
+
+        # Optional: match expected size
+        W = W[:359, :359]
+
+        # Remove negative weights (as done in the paper)
+        W[W < 0] = 0
+
+        # Compute modularity
+        _, Q = bct.modularity_louvain_und(W, seed=42)
+        
+        return Q
+    except Exception as e:
+        print(f"Error: {e}")
+        return np.nan
+
+
+
 ############################################## HEMISPHERIC SYMETRY ################################
+
+
 
 def check_network_symmetry(region_to_yeo, region_to_hemi, roi_indices):
     sub_yeo = region_to_yeo[region_to_yeo['Glasser_Index'].isin(roi_indices)]
@@ -2142,6 +1961,8 @@ def check_network_symmetry(region_to_yeo, region_to_hemi, roi_indices):
     counts = combined.groupby(['Yeo_Network', 'Hemisphere']).size()
     #print("Yeo-Hemisphere counts:\n", counts)
     return counts
+
+
 
 def compute_system_segregation(fc_df, region_to_yeo):
     segregation_scores = []
@@ -2161,6 +1982,7 @@ def compute_system_segregation(fc_df, region_to_yeo):
         else:
             segregation_scores.append(within / between)
     return segregation_scores
+
 
 
 def compute_hemispheric_symmetry(seg_scores, region_to_hemi):
@@ -2229,14 +2051,18 @@ def compute_symmetry_from_fc_df(fc_df, region_to_yeo, region_to_hemi):
     return pd.DataFrame(results)
 
 
-######################################## Homotopy #########################################
+
+######################################## HOMOTOPY #########################################
+
+
 
 def compute_mean_homotopic_fc(fc_df, pairs):
     values = [fc_df.loc[i, j] for i, j in pairs]
     return pd.Series(values).mean()
 
 
-######################################## Regression #########################################
+
+######################################## REGRESSION #########################################
 
 def run_Ridge_with_RFE(X_df_clean, y, param_grid, motor_score_name=None, apply_log_transform=True, verbose=True):
     """
@@ -2342,7 +2168,6 @@ def run_Ridge_with_RFE(X_df_clean, y, param_grid, motor_score_name=None, apply_l
         print(f"Target variable std: {y.std():.3f}")
     
     # Calculate skewness
-    from scipy.stats import skew
     y_skewness = skew(y)
     
     if verbose:
@@ -2577,6 +2402,8 @@ def preprocess_data_for_regression(df_aligned, regression_info, tp=3, motor_scor
     
     return X_df_clean, y, param_grid
 
+
+
 def run_whole_pipeline(df_aligned, regression_info, tp=3, motor_score='Fugl_Meyer_ipsi', striatum_labels=None, apply_log_transform=True, verbose=True):
     """
     Run the whole pipeline for feature selection and model training with comprehensive validation.
@@ -2781,7 +2608,6 @@ def run_whole_pipeline(df_aligned, regression_info, tp=3, motor_score='Fugl_Meye
     
     return results
 
-# I have to think about what I want to return !!
 
 
 def demonstrate_improved_regression_pipeline(df_aligned, regression_info, striatum_labels=None):
@@ -2876,6 +2702,8 @@ def demonstrate_improved_regression_pipeline(df_aligned, regression_info, striat
                     print(f"  T{tp}: R²={r2_orig:.3f} (orig), R²={r2_trans:.3f} (trans), {transform}, {n_features} features")
     
     return all_results
+
+
 
 def run_neural_network_regression(X_df_clean, y, motor_score_name=None, apply_log_transform=True, verbose=True, 
                                  hidden_layer_sizes=(100, 50), max_iter=1000, random_state=42, 
@@ -3075,7 +2903,6 @@ def run_neural_network_regression(X_df_clean, y, motor_score_name=None, apply_lo
         # Predict on training data
         y_pred_transformed = model.predict(X_df_clean)
         # R^2 on transformed scale
-        from sklearn.metrics import r2_score
         r2_transformed = r2_score(y_transformed, y_pred_transformed)
         # R^2 on original scale (if possible)
         try:
@@ -3092,7 +2919,6 @@ def run_neural_network_regression(X_df_clean, y, motor_score_name=None, apply_lo
                 print("R² on original scale: Could not compute (reverse transform failed)")
         
         # Permutation importance for top 5 predictors
-        from sklearn.inspection import permutation_importance
         result = permutation_importance(model, X_df_clean, y_transformed, n_repeats=10, random_state=random_state, scoring='r2')
         importances = result.importances_mean
         feature_names = X_df_clean.columns
@@ -3122,6 +2948,7 @@ def run_neural_network_regression(X_df_clean, y, motor_score_name=None, apply_lo
         raise RuntimeError(f"Neural network training failed: {str(e)}")
     
     return model, y_transformed, transformation_info, r2_transformed, r2_original, y_pred, y_pred_transformed
+
 
 
 def run_random_forest_regression(X_df_clean, y, motor_score_name=None, apply_log_transform=True, verbose=True,
@@ -3320,6 +3147,7 @@ def run_random_forest_regression(X_df_clean, y, motor_score_name=None, apply_log
     return rf_model, y_transformed, transformation_info, feature_importance
 
 
+
 def check_regression_assumptions(y_true, y_pred, y_transformed=None, y_pred_transformed=None, 
                                 transformation_info=None, verbose=True, alpha=0.05):
     """
@@ -3381,7 +3209,6 @@ def check_regression_assumptions(y_true, y_pred, y_transformed=None, y_pred_tran
         print("-" * 30)
     
     # Shapiro-Wilk test for normality
-    from scipy.stats import shapiro, jarque_bera
     
     # Test original residuals
     shapiro_stat_orig, shapiro_p_orig = shapiro(residuals_original)
@@ -3423,8 +3250,6 @@ def check_regression_assumptions(y_true, y_pred, y_transformed=None, y_pred_tran
         print("-" * 40)
     
     # Breusch-Pagan test for homoscedasticity
-    from scipy.stats import spearmanr
-    
     # Test correlation between residuals and predicted values
     spearman_corr_orig, spearman_p_orig = spearmanr(y_pred, np.abs(residuals_original))
     
@@ -3644,7 +3469,6 @@ def check_regression_assumptions(y_true, y_pred, y_transformed=None, y_pred_tran
             axes[0, 0].grid(True, alpha=0.3)
             
             # 2. Q-Q Plot (Original)
-            from scipy.stats import probplot
             probplot(residuals_original, dist="norm", plot=axes[0, 1])
             axes[0, 1].set_title('Q-Q Plot (Original)')
             axes[0, 1].grid(True, alpha=0.3)
@@ -3689,8 +3513,7 @@ def check_regression_assumptions(y_true, y_pred, y_transformed=None, y_pred_tran
     
     return results
 
-from scipy.stats import skew
-import numpy as np
+
 
 def transform_target_if_skewed(y, motor_score_name=None, apply_log_transform=True, verbose=True):
     """
@@ -3756,6 +3579,8 @@ def transform_target_if_skewed(y, motor_score_name=None, apply_log_transform=Tru
         print(f"Transformation applied: {transformation_info['transformation_applied'] or 'None'}")
 
     return y_transformed, transformation_info
+
+
 
 def visualize_neural_network_regression(model, X_df_clean, y, y_transformed, transformation_info, 
                                        motor_score_name=None, figsize=(15, 12), save_path=None):
@@ -3930,6 +3755,7 @@ def visualize_neural_network_regression(model, X_df_clean, y, y_transformed, tra
     return fig
 
 
+
 def plot_neural_network_learning_curves(model, X_df_clean, y_transformed, cv_splits=5, 
                                        motor_score_name=None, figsize=(12, 5), save_path=None):
     """
@@ -3957,8 +3783,6 @@ def plot_neural_network_learning_curves(model, X_df_clean, y_transformed, cv_spl
     fig : matplotlib.figure.Figure
         The created figure with learning curves.
     """
-    
-    from sklearn.model_selection import learning_curve
     
     # Generate learning curves
     train_sizes, train_scores, val_scores = learning_curve(
@@ -4026,6 +3850,7 @@ def plot_neural_network_learning_curves(model, X_df_clean, y_transformed, cv_spl
     return fig
 
 
+
 def create_neural_network_diagnostic_report(model, X_df_clean, y, y_transformed, transformation_info, 
                                            motor_score_name=None, save_dir=None):
     """
@@ -4066,8 +3891,6 @@ def create_neural_network_diagnostic_report(model, X_df_clean, y, y_transformed,
         use_original_scale = False
     
     # Calculate metrics
-    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-    
     metrics = {
         'r2_transformed': r2_score(y_transformed, y_pred_transformed),
         'mse_transformed': mean_squared_error(y_transformed, y_pred_transformed),
