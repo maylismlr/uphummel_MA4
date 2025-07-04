@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from collections import defaultdict
 
 # for clustering
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
@@ -35,12 +36,16 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.inspection import permutation_importance
 from scipy.stats import probplot
 from sklearn.model_selection import learning_curve
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.metrics import accuracy_score, log_loss
 
 # for prettiness <3
 from tqdm import tqdm
 
 # for modularity
 import bct
+
 
 
 ############################################## LOAD DATA FUNCTIONS #################################
@@ -3969,3 +3974,118 @@ def create_neural_network_diagnostic_report(model, X_df_clean, y, y_transformed,
         'use_original_scale': use_original_scale,
         'figures': [fig1, fig2] if save_dir else None
     }
+
+############################################# CLASSIFICATION FUNCTIONS #############################################
+
+def nagelkerke_r2(y_true, y_pred_proba, y_null_proba):
+    """
+    Compute Nagelkerke's pseudo-R² for binary classification,
+    robust to test sets that contain only one class.
+    """
+    N = len(y_true)
+    try:
+        logL_model = -log_loss(y_true, y_pred_proba, labels=[0, 1], normalize=False)
+        logL_null = -log_loss(y_true, y_null_proba, labels=[0, 1], normalize=False)
+    except ValueError:
+        return None  # In case log_loss fails despite labels arg
+
+    r2 = (1 - np.exp(-2 * (logL_model - logL_null) / N)) / (1 - np.exp(-2 * logL_null / N))
+    return r2
+
+
+
+def run_classification_with_rfe_tracking(X_df, y, n_splits=100, test_size=0.1, min_accuracy_threshold=0.9):
+    """
+    Classification with RFE and repeated subsampling based on Adhikari et al., 2021.
+    Also computes average Nagelkerke R² over successful splits.
+
+    Parameters
+    ----------
+    X_df : pd.DataFrame
+        Z-scored input features.
+    y : np.array
+        Target binary class labels (0 or 1).
+    n_splits : int
+        Number of train/test splits to repeat.
+    test_size : float
+        Proportion of data to hold out for testing.
+    min_accuracy_threshold : float
+        Minimum accuracy required to retain feature set and compute R².
+
+    Returns
+    -------
+    feature_ranking_counts : pd.Series
+        How often each feature was selected across good splits.
+    r2_scores : list
+        List of Nagelkerke R² values from each successful split.
+    """
+    sss = StratifiedShuffleSplit(n_splits=n_splits, test_size=test_size, random_state=42)
+    feature_counts = defaultdict(int)
+    r2_scores = []
+
+    for train_idx, test_idx in sss.split(X_df, y):
+        X_train, X_test = X_df.iloc[train_idx], X_df.iloc[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        # Fit MLR with RFE
+        base_model = LogisticRegression(max_iter=1000, solver='lbfgs')  # Let multi_class be automatic
+        rfe = RFE(estimator=base_model, n_features_to_select=1, step=1)
+        rfe.fit(X_train, y_train)
+
+        # Get feature ranking order (best to worst)
+        ranking_order = np.argsort(rfe.ranking_)
+
+        # Track accuracy and R² as we reduce features
+        best_features = []
+        best_accuracy = 0
+        best_r2 = None
+
+        for i in range(1, len(ranking_order) + 1):
+            selected = X_train.columns[ranking_order[:i]]
+            model = LogisticRegression(max_iter=1000, solver='lbfgs')
+            model.fit(X_train[selected], y_train)
+            y_pred = model.predict(X_test[selected])
+            acc = accuracy_score(y_test, y_pred)
+
+            if acc >= min_accuracy_threshold and acc >= best_accuracy:
+                best_accuracy = acc
+                best_features = selected.tolist()  # Convert to plain list
+
+                # Compute Nagelkerke R²
+                y_pred_proba = model.predict_proba(X_test[selected])
+                y_null_proba = np.tile(np.bincount(y_train) / len(y_train), (len(y_test), 1))
+                best_r2 = nagelkerke_r2(y_test, y_pred_proba, y_null_proba)
+
+        if len(best_features) > 0:
+            for feat in best_features:
+                feature_counts[feat] += 1
+            if best_r2 is not None:
+                r2_scores.append(best_r2)
+
+
+    feature_ranking_counts = pd.Series(feature_counts).sort_values(ascending=False)
+    return feature_ranking_counts, r2_scores
+
+def run_simple_classification(X_df, y, n_splits=100, test_size=0.1, min_accuracy_threshold=0.9):
+    sss = StratifiedShuffleSplit(n_splits=n_splits, test_size=test_size, random_state=42)
+    r2_scores = []
+    acc_scores = []
+
+    for train_idx, test_idx in sss.split(X_df, y):
+        X_train, X_test = X_df.iloc[train_idx], X_df.iloc[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        model = LogisticRegression(max_iter=1000)
+        model.fit(X_train, y_train)
+
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+
+        if acc >= min_accuracy_threshold:
+            y_pred_proba = model.predict_proba(X_test)
+            y_null_proba = np.tile(np.bincount(y_train) / len(y_train), (len(y_test), 1))
+            r2 = nagelkerke_r2(y_test, y_pred_proba, y_null_proba)
+            r2_scores.append(r2)
+            acc_scores.append(acc)
+
+    return acc_scores, r2_scores
